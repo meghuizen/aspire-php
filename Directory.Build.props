@@ -1,0 +1,22 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package metadata">
+    <Version>1.0.0-preview.1</Version>
+    <Authors>michiele</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+</Project>

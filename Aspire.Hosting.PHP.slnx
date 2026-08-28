@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/playground/">
+    <Project Path="playground/PhpPlayground.AppHost/PhpPlayground.AppHost.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Aspire.Hosting.PHP/Aspire.Hosting.PHP.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Aspire.Hosting.PHP.Tests/Aspire.Hosting.PHP.Tests.csproj" />
+  </Folder>
+</Solution>

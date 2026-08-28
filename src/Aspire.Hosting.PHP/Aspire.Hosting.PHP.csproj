@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Aspire.Hosting.PHP</PackageId>
+    <Description>PHP support for Aspire. Model PHP workers and web applications as Aspire resources.</Description>
+    <PackageTags>aspire integration hosting php framework runtime frankenphp composer</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aspire.Hosting.PHP.Tests" />
+  </ItemGroup>
+
+</Project>

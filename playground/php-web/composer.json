@@ -1,0 +1,12 @@
+{
+    "name": "aspire/php-web",
+    "description": "Sample PHP web application for Aspire.Hosting.PHP",
+    "require": {
+        "php": "^8.5"
+    },
+    "config": {
+        "platform": {
+            "php": "8.5.0"
+        }
+    }
+}

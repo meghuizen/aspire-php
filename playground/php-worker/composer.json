@@ -1,0 +1,12 @@
+{
+    "name": "aspire/php-worker",
+    "description": "Sample PHP worker for Aspire.Hosting.PHP",
+    "require": {
+        "php": "^8.5"
+    },
+    "config": {
+        "platform": {
+            "php": "8.5.0"
+        }
+    }
+}
