@@ -38,6 +38,12 @@ internal static class PhpImages
     /// <summary>The unprivileged user the serversideup images run as.</summary>
     public const string ContainerUser = "www-data";
 
+    /// <summary>Default image for nginx web applications.</summary>
+    public const string DefaultFpmNginxImage = "docker.io/serversideup/php:8.5-fpm-nginx-alpine";
+
+    /// <summary>The nginx image tag family, used when a specific PHP version is pinned.</summary>
+    public const string FpmNginxImageTemplate = "docker.io/serversideup/php:{0}-fpm-nginx-alpine";
+
     /// <summary>Default image for Apache web applications. Debian: no Alpine variant of this image exists.</summary>
     public const string DefaultApacheImage = "docker.io/serversideup/php:8.5-fpm-apache";
 

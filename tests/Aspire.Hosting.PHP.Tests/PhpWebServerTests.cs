@@ -5,7 +5,7 @@ using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.PHP.Tests;
 
-public class PhpApacheTests
+public class PhpWebServerTests
 {
     [Fact]
     public void UsesTheApacheImage()
@@ -96,6 +96,87 @@ public class PhpApacheTests
 
         Assert.Contains(
             "frankenphp",
+            PhpTestBuilder.RenderPublishDockerfile(php.Resource),
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(PhpWebServer.FrankenPhp, "8.5-frankenphp-alpine")]
+    [InlineData(PhpWebServer.FpmNginx, "8.5-fpm-nginx-alpine")]
+    [InlineData(PhpWebServer.Apache, "8.5-fpm-apache")]
+    public void TheSelectorPicksTheImage(PhpWebServer webServer, string expectedTag)
+    {
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        var php = builder.AddPhpWebApp("app", directory.Path, "public", webServer);
+
+        Assert.Contains(
+            $"serversideup/php:{expectedTag}",
+            PhpTestBuilder.RenderPublishDockerfile(php.Resource),
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(PhpWebServer.FrankenPhp, "CADDY_HTTP_PORT", "CADDY_SERVER_ROOT")]
+    [InlineData(PhpWebServer.FpmNginx, "NGINX_HTTP_PORT", "NGINX_WEBROOT")]
+    [InlineData(PhpWebServer.Apache, "APACHE_HTTP_PORT", "APACHE_DOCUMENT_ROOT")]
+    public async Task TheSelectorPicksTheEnvironmentVariables(
+        PhpWebServer webServer,
+        string portVariable,
+        string rootVariable)
+    {
+        // Each server reads only its own names and none fall back to a shared one, so a mismatch is a
+        // container that starts cleanly and serves nothing.
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        var php = builder.AddPhpWebApp("app", directory.Path, "htdocs", webServer);
+
+        var env = await GetEnvironmentAsync(builder, php.Resource);
+
+        Assert.True(env.ContainsKey(portVariable), $"expected {portVariable}");
+        Assert.Equal("/var/www/html/htdocs", env[rootVariable]);
+    }
+
+    [Theory]
+    [InlineData(PhpWebServer.FpmNginx)]
+    [InlineData(PhpWebServer.Apache)]
+    public void ServersThatNeedFpmAlwaysRunAsContainers(PhpWebServer webServer)
+    {
+        // PHP built-in server has no FastCGI layer, so it cannot stand in for these.
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreateRunBuilder(directory.Path);
+
+        var php = builder.AddPhpWebApp("app", directory.Path, "public", webServer);
+
+        Assert.Equal(PhpRunMode.Container, php.Resource.RunMode);
+    }
+
+    [Theory]
+    [InlineData(PhpWebServer.FpmNginx)]
+    [InlineData(PhpWebServer.Apache)]
+    public void AskingToRunThoseLocallyIsRejected(PhpWebServer webServer)
+    {
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreateRunBuilder(directory.Path);
+
+        var exception = Assert.Throws<DistributedApplicationException>(
+            () => builder.AddPhpWebApp("app", directory.Path, "public", webServer, PhpRunMode.Executable));
+
+        Assert.Contains("cannot run as a local php process", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheNginxShorthandMatchesTheSelector()
+    {
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        var php = builder.AddPhpNginxApp("app", directory.Path);
+
+        Assert.Contains(
+            "serversideup/php:8.5-fpm-nginx-alpine",
             PhpTestBuilder.RenderPublishDockerfile(php.Resource),
             StringComparison.Ordinal);
     }

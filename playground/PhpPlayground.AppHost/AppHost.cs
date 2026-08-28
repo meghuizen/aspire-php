@@ -55,4 +55,9 @@ builder.AddPhpApacheApp("legacy", "../php-legacy")
        .WithHealthCheck()
        .WithExternalHttpEndpoints();
 
+// The traditional nginx + PHP-FPM pairing, selected with the enum rather than a dedicated method.
+builder.AddPhpWebApp("nginx-app", "../php-web", webServer: PhpWebServer.FpmNginx)
+       .WithHealthCheck()
+       .WithExternalHttpEndpoints();
+
 builder.Build().Run();

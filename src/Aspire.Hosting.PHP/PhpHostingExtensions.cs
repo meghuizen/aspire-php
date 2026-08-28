@@ -85,18 +85,25 @@ public static partial class PhpHostingExtensions
     /// <param name="name">The name of the resource.</param>
     /// <param name="appDirectory">The directory holding the application. Also the Docker build context when publishing.</param>
     /// <param name="documentRoot">The document root relative to <paramref name="appDirectory"/>. Defaults to <c>public</c>.</param>
+    /// <param name="webServer">Which web server serves it. Defaults to <see cref="PhpWebServer.FrankenPhp"/>.</param>
     /// <param name="runMode">How the resource runs during <c>aspire run</c>. Defaults to <see cref="PhpRunMode.Auto"/>.</param>
     /// <returns>A reference to the resource builder.</returns>
     /// <remarks>
     /// <para>
-    /// Publishing produces a FrankenPHP container. FrankenPHP is Caddy with PHP compiled in, so the application
-    /// is a single long-running process that binds a port, which is what lets it map onto one Aspire HTTP
-    /// endpoint. Classic PHP-FPM cannot: it speaks FastCGI and needs a separate web server in front of it.
+    /// The default is FrankenPHP: Caddy with PHP compiled into the same binary, so the application is a single
+    /// process that binds a port, which is what lets it map onto one Aspire HTTP endpoint. PHP-FPM cannot do
+    /// that on its own — it speaks FastCGI and needs a web server in front of it — which is why the other
+    /// options are a web server and FPM together in one container, under a supervisor.
     /// </para>
     /// <para>
-    /// Running with a local PHP uses PHP's built-in development server instead, which is single-threaded and
-    /// unsuitable for production. What you run locally and what you deploy therefore differ here by design.
-    /// Container run mode uses FrankenPHP and so matches production.
+    /// Choose <see cref="PhpWebServer.Apache"/> when the application needs <c>.htaccess</c>, and
+    /// <see cref="PhpWebServer.FpmNginx"/> for the traditional pairing or when an extension dislikes the
+    /// thread-safe PHP build FrankenPHP requires.
+    /// </para>
+    /// <para>
+    /// Only FrankenPHP can be stood in for by a local PHP: running that way uses PHP's built-in development
+    /// server, which is single-threaded and unsuitable for production, so what you run locally and what you
+    /// deploy differ by design. The other servers always run as containers, and therefore always match.
     /// </para>
     /// </remarks>
     /// <example>
@@ -116,6 +123,7 @@ public static partial class PhpHostingExtensions
         [ResourceName] string name,
         string appDirectory,
         string documentRoot = DefaultDocumentRoot,
+        PhpWebServer webServer = PhpWebServer.FrankenPhp,
         PhpRunMode runMode = PhpRunMode.Auto)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -125,9 +133,24 @@ public static partial class PhpHostingExtensions
 
         var resolvedDirectory = Path.GetFullPath(appDirectory, builder.AppHostDirectory);
         var version = PhpVersionDetector.DetectVersion(resolvedDirectory) ?? PhpVersionDetector.DefaultPhpVersion;
+
+        // Only FrankenPHP has a local stand-in. PHP's built-in server has no FastCGI layer and ignores
+        // .htaccess, so using it in place of nginx or Apache would quietly change the application's behaviour.
+        if (!PhpWebServers.SupportsLocalPhp(webServer))
+        {
+            if (runMode == PhpRunMode.Executable)
+            {
+                throw new DistributedApplicationException(
+                    $"The PHP app '{name}' is served by {PhpWebServers.DisplayName(webServer)}, which cannot run as a " +
+                    "local php process. Use PhpRunMode.Container, or PhpWebServer.FrankenPhp to run locally.");
+            }
+
+            runMode = PhpRunMode.Container;
+        }
+
         var resolution = ResolveRunMode(builder, name, runMode, version);
 
-        return resolution.UseContainer
+        IResourceBuilder<IPhpWebResource> app = resolution.UseContainer
             ? ConfigureContainerApp(
                 builder,
                 new PhpWebContainerAppResource(name, resolvedDirectory, documentRoot),
@@ -141,6 +164,12 @@ public static partial class PhpHostingExtensions
                 version,
                 resolution.PhpExecutablePath!,
                 documentRoot);
+
+        // Attached after the resource exists, but before anything reads it: the image and the environment are
+        // both resolved later, from this annotation.
+        return app.WithAnnotation(
+            new PhpWebServerAnnotation(webServer),
+            ResourceAnnotationMutationBehavior.Replace);
     }
 
     // Decides between a local php process and a container. This has to happen here, before the resource is
@@ -340,20 +369,11 @@ public static partial class PhpHostingExtensions
         EndpointReference endpoint,
         string documentRoot)
     {
-        var containerDocumentRoot = $"{PhpImages.AppBaseDirectory}/{ToContainerPath(documentRoot)}";
-        var isApache = resource.TryGetLastAnnotation<PhpWebServerAnnotation>(out var webServer)
-            && webServer.WebServer == PhpWebServer.Apache;
+        var webServer = PhpWebServers.Resolve(resource);
 
-        if (isApache)
-        {
-            environment["APACHE_HTTP_PORT"] = endpoint.Property(EndpointProperty.TargetPort);
-            environment["APACHE_DOCUMENT_ROOT"] = containerDocumentRoot;
-        }
-        else
-        {
-            environment["CADDY_HTTP_PORT"] = endpoint.Property(EndpointProperty.TargetPort);
-            environment["CADDY_SERVER_ROOT"] = containerDocumentRoot;
-        }
+        environment[PhpWebServers.PortVariable(webServer)] = endpoint.Property(EndpointProperty.TargetPort);
+        environment[PhpWebServers.DocumentRootVariable(webServer)] =
+            $"{PhpImages.AppBaseDirectory}/{ToContainerPath(documentRoot)}";
     }
 
     private static void ConfigureCommon<T>(

@@ -87,16 +87,14 @@ internal sealed record PhpDockerfileOptions
             return explicitImage;
         }
 
-        var isApache = isWeb
-            && resource.TryGetLastAnnotation<PhpWebServerAnnotation>(out var webServer)
-            && webServer.WebServer == PhpWebServer.Apache;
-
-        var (defaultImage, defaultTemplate) = (isWeb, isApache) switch
-        {
-            (true, true) => (PhpImages.DefaultApacheImage, PhpImages.ApacheImageTemplate),
-            (true, false) => (PhpImages.DefaultWebImage, PhpImages.WebImageTemplate),
-            _ => (PhpImages.DefaultCliImage, PhpImages.CliImageTemplate)
-        };
+        var (defaultImage, defaultTemplate) = !isWeb
+            ? (PhpImages.DefaultCliImage, PhpImages.CliImageTemplate)
+            : PhpWebServers.Resolve(resource) switch
+            {
+                PhpWebServer.Apache => (PhpImages.DefaultApacheImage, PhpImages.ApacheImageTemplate),
+                PhpWebServer.FpmNginx => (PhpImages.DefaultFpmNginxImage, PhpImages.FpmNginxImageTemplate),
+                _ => (PhpImages.DefaultWebImage, PhpImages.WebImageTemplate)
+            };
 
         var version = resource.TryGetLastAnnotation<PhpEnvironmentAnnotation>(out var environment)
             ? environment.Version

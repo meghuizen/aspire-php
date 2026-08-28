@@ -3,31 +3,44 @@ namespace Aspire.Hosting.PHP;
 /// <summary>
 /// The web server a PHP web application is served by.
 /// </summary>
+/// <remarks>
+/// Pass one to <c>AddPhpWebApp</c>. They differ in more than name: whether <c>.htaccess</c> is read, whether
+/// PHP is built thread-safe, how large the image is, and whether worker mode is available.
+/// </remarks>
 public enum PhpWebServer
 {
     /// <summary>
-    /// FrankenPHP: Caddy with PHP compiled in, as a single long-running process.
+    /// FrankenPHP: Caddy with PHP compiled into the same binary, as a single process.
     /// </summary>
     /// <remarks>
-    /// The default. One process that binds a port, so it maps onto one Aspire endpoint with no sidecar, and it
-    /// supports worker mode. Runs thread-safe (ZTS) PHP, which a few extensions do not tolerate.
+    /// The default, and the only one here that is genuinely one process — the others run a web server and
+    /// PHP-FPM side by side under a supervisor. Supports worker mode. Runs thread-safe (ZTS) PHP, which a few
+    /// extensions do not tolerate. Does not read <c>.htaccess</c>.
     /// </remarks>
     FrankenPhp = 0,
 
     /// <summary>
-    /// Apache with PHP-FPM, which is the only option here that honours <c>.htaccess</c>.
+    /// nginx with PHP-FPM, in one container.
+    /// </summary>
+    /// <remarks>
+    /// The traditional pairing, and the most widely deployed. Runs non-thread-safe PHP, which suits extensions
+    /// that dislike ZTS. nginx has no <c>.htaccess</c> equivalent at all, so rewrite rules have to live in
+    /// server configuration. No worker mode.
+    /// </remarks>
+    FpmNginx = 1,
+
+    /// <summary>
+    /// Apache with PHP-FPM, which is the only option here that reads <c>.htaccess</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Only worth choosing when the application genuinely needs <c>.htaccess</c> — a legacy application, or a
-    /// WordPress plugin that writes rewrite rules. nginx has no equivalent feature at all, so this is not a
-    /// general "not FrankenPHP" escape hatch, it is specifically the Apache one.
+    /// Choose it when the application genuinely needs those files — a legacy application, or a WordPress plugin
+    /// that writes its own rewrite rules.
     /// </para>
     /// <para>
-    /// It costs size: no Alpine variant of the Apache image exists, so it is Debian-based and roughly four
-    /// times the compressed size of the Alpine images. It also runs non-thread-safe PHP, which is an advantage
-    /// for extensions that dislike ZTS.
+    /// It costs size: no Alpine variant of the Apache image exists, so it is Debian-based at roughly four times
+    /// the compressed size of the others. Runs non-thread-safe PHP. No worker mode.
     /// </para>
     /// </remarks>
-    Apache = 1
+    Apache = 2
 }

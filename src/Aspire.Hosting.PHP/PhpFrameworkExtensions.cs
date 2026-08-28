@@ -48,7 +48,7 @@ public static class PhpFrameworkExtensions
         [ResourceName] string name,
         string appDirectory,
         PhpRunMode runMode = PhpRunMode.Auto)
-        => builder.AddPhpWebApp(name, appDirectory, "public", runMode)
+        => builder.AddPhpWebApp(name, appDirectory, "public", runMode: runMode)
             .WithConnectionConvention(PhpConnectionConvention.Laravel)
             .WithComposer()
             .WithPhpExtension(s_commonWebExtensions)
@@ -78,7 +78,7 @@ public static class PhpFrameworkExtensions
         [ResourceName] string name,
         string appDirectory,
         PhpRunMode runMode = PhpRunMode.Auto)
-        => builder.AddPhpWebApp(name, appDirectory, "public", runMode)
+        => builder.AddPhpWebApp(name, appDirectory, "public", runMode: runMode)
             .WithConnectionConvention(PhpConnectionConvention.Symfony)
             .WithComposer()
             .WithPhpExtension(s_commonWebExtensions)
@@ -116,7 +116,7 @@ public static class PhpFrameworkExtensions
         [ResourceName] string name,
         string appDirectory,
         PhpRunMode runMode = PhpRunMode.Auto)
-        => builder.AddPhpWebApp(name, appDirectory, ".", runMode)
+        => builder.AddPhpWebApp(name, appDirectory, ".", runMode: runMode)
             .WithConnectionConvention(PhpConnectionConvention.WordPress)
             // mysqli rather than only pdo_mysql: WordPress core uses the mysqli API directly.
             .WithPhpExtension([.. s_commonWebExtensions, "mysqli", "exif"]);
@@ -141,7 +141,7 @@ public static class PhpFrameworkExtensions
         string appDirectory,
         string documentRoot = "web",
         PhpRunMode runMode = PhpRunMode.Auto)
-        => builder.AddPhpWebApp(name, appDirectory, documentRoot, runMode)
+        => builder.AddPhpWebApp(name, appDirectory, documentRoot, runMode: runMode)
             .WithConnectionConvention(PhpConnectionConvention.Drupal)
             .WithComposer()
             .WithPhpExtension([.. s_commonWebExtensions, "opcache"]);
@@ -169,7 +169,7 @@ public static class PhpFrameworkExtensions
         [ResourceName] string name,
         string appDirectory,
         PhpRunMode runMode = PhpRunMode.Auto)
-        => builder.AddPhpWebApp(name, appDirectory, ".", runMode)
+        => builder.AddPhpWebApp(name, appDirectory, ".", runMode: runMode)
             .WithConnectionConvention(PhpConnectionConvention.Joomla)
             .WithPhpExtension([.. s_commonWebExtensions, "mysqli"]);
 
