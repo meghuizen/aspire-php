@@ -47,6 +47,23 @@ public class PhpOptimizationTests
     }
 
     [Fact]
+    public void Jit_TurnsOpcacheOnBecauseItIsPartOfOpcache()
+    {
+        // The JIT does nothing without OPcache. Requesting it while OPcache is off would produce ini that
+        // reads correctly and silently never engages -- verified: opcache_get_status reports jit disabled.
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreateRunBuilder(directory.Path);
+
+        var php = builder.AddPhpApp("worker", directory.Path, "worker.php", PhpRunMode.Container)
+            .WithPhpOptimizations(o => o.OpcacheJit = true);
+
+        var dockerfile = PhpTestBuilder.RenderDevDockerfile(php.Resource);
+
+        Assert.Contains("opcache.enable=1", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.jit=tracing", dockerfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Jit_IsOffUnlessAskedFor()
     {
         // It helps numeric work and does close to nothing for ordinary request handling, so it is not a default.

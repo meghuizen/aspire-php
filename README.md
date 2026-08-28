@@ -421,14 +421,71 @@ builder.AddLaravelApp("shop", "../shop")
 | `opcache.max_accelerated_files` | 20000 | A framework exceeds PHP's default of 10000, and files past the limit are silently recompiled every request — which looks like OPcache not working at all |
 | `opcache.memory_consumption` | 128 MB | |
 | `opcache.interned_strings_buffer` | 16 MB | |
-| `opcache.jit` | **off** | Large gains on numeric work, close to nothing on request handling, which is I/O bound. Measure before enabling |
+| `opcache.jit` | **off** | Measured: 40-50% on tight numeric loops, inside noise on request-shaped work. See below |
 | `opcache.preload` | not set | Keeps framework classes resident instead of linking them per request. Publishing only |
-| `apcu` + `igbinary` | on | igbinary halves what a cache round-trip serializes |
+| `apcu` + `igbinary` | **on by default, no call needed** | igbinary halves what a cache round-trip serializes |
 | `session.serialize_handler` | igbinary | |
 | `realpath_cache_size` | 4096 KB | PHP's default of 256 KB is far too small for a framework resolving thousands of include paths |
 | Composer autoloader | `--classmap-authoritative` | No filesystem fallback. Correct for a fixed image |
 
 Everything is applied as php.ini values, so it works the same for a local process and a container.
+
+### igbinary and APCu are on by default
+
+You get them without calling `WithPhpOptimizations` at all. Verified inside a built image:
+
+```
+session.serialize_handler    igbinary
+apc.serializer               igbinary
+igbinary payload             60 bytes vs serialize 114
+```
+
+Two costs to know about:
+
+- **+33 seconds on every image build** — 6 s becomes 39 s, because the extension installer compiles both from
+  C source. Layer caching means you pay it per base-image change, not per source edit.
+- **igbinary session data is not readable by a PHP instance using the default handler.** Fine for a fresh
+  deployment. If you have existing sessions in a shared store, or non-igbinary instances reading the same Redis,
+  switching logs those users out.
+
+Opt out per resource:
+
+```csharp
+.WithPhpOptimizations(o => { o.Igbinary = false; o.Apcu = false; })
+```
+
+### Why the JIT is off by default
+
+Measured rather than assumed, on PHP 8.5 with OPcache on:
+
+| Workload | JIT off | JIT tracing | Change |
+|---|---|---|---|
+| Tight numeric loop | 0.133–0.153 s | 0.068–0.099 s | **~40–50% faster** |
+| Request-shaped work | 0.057–0.063 s | 0.045–0.083 s | within noise |
+
+And the request-shaped benchmark performs **no I/O at all**, so a real request — waiting on a database, a cache,
+a network call — would show less again.
+
+**It is not a security problem.** PHP maps the JIT buffer twice: writable in one view, executable in the other.
+A process with the JIT actively compiling has **zero writable-and-executable mappings**, confirmed by reading
+`/proc/self/maps` after 2,341 bytes of code had been generated. No W^X violation.
+
+What it does cost is the buffer, reserved per process, for no measurable gain on a typical web workload. There
+is also one hard incompatibility:
+
+> `JIT is incompatible with third party extensions that override zend_execute_ex(). JIT disabled.`
+
+**Xdebug loads such an extension**, so the JIT and step debugging are mutually exclusive — PHP silently turns
+the JIT off when Xdebug is present.
+
+Turn it on when you have measured a CPU-bound workload that benefits:
+
+```csharp
+.WithPhpOptimizations(o => o.OpcacheJit = true)
+```
+
+That also turns OPcache on, because the JIT is part of OPcache and does nothing without it — asking for the JIT
+alone produced ini that read correctly and never engaged.
 
 ### igbinary and Redis
 

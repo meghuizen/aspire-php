@@ -25,7 +25,7 @@ public class PhpExtensionNameTests
             .WithPhpExtension(PhpExtensions.DataStructures, PhpExtensions.SimdJson, PhpExtensions.PdoSqlServer);
 
         Assert.Contains(
-            "RUN install-php-extensions ds simdjson pdo_sqlsrv",
+            "RUN install-php-extensions igbinary apcu ds simdjson pdo_sqlsrv",
             PhpTestBuilder.RenderPublishDockerfile(php.Resource),
             StringComparison.Ordinal);
     }

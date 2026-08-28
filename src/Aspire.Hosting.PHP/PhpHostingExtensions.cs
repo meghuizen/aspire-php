@@ -387,6 +387,12 @@ public static partial class PhpHostingExtensions
         resourceBuilder
             .WithIconName("Code")
             .WithOtlpExporter()
+            // igbinary and APCu by default. igbinary produces roughly half the bytes of PHP's own
+            // serialize() and parses faster, and it only affects things that are serialized — sessions and
+            // cache — so it costs nothing elsewhere. Turn either off through WithPhpOptimizations.
+            .WithPhpExtension(PhpExtensions.Igbinary, PhpExtensions.Apcu)
+            .WithPhpIniSetting("session.serialize_handler", "igbinary")
+            .WithPhpIniSetting("apc.serializer", "igbinary")
             .WithEnvironment(context =>
             {
                 // The serversideup images print a large ASCII banner on every start, which would otherwise

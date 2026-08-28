@@ -54,6 +54,14 @@ internal sealed class PhpExtensionAnnotation : IResourceAnnotation
             }
         }
     }
+
+    /// <summary>
+    /// Drops an extension that was added by default.
+    /// </summary>
+    /// <remarks>
+    /// Only used to undo the defaults. Removing an extension the application asked for would silently break it.
+    /// </remarks>
+    public void Remove(string extension) => _extensions.Remove(extension);
 }
 
 /// <summary>php.ini settings applied to the application.</summary>

@@ -59,7 +59,10 @@ public static partial class PhpHostingExtensions
     private static void ApplyOpcache<T>(IResourceBuilder<T> builder, PhpOptimizationOptions options, bool isPublish)
         where T : IPhpResource
     {
-        var enabled = options.Opcache ?? isPublish;
+        // The JIT is part of OPcache and does nothing without it. Asking for the JIT while OPcache is off
+        // produces ini that reads correctly and silently never engages, so the JIT turns OPcache on rather
+        // than being quietly ignored.
+        var enabled = options.OpcacheJit || (options.Opcache ?? isPublish);
 
         builder.WithPhpIniSetting("opcache.enable", enabled ? "1" : "0");
 
@@ -104,32 +107,40 @@ public static partial class PhpHostingExtensions
         }
     }
 
+    /// <summary>
+    /// Applies the serializer options, which are on by default and can only be turned off here.
+    /// </summary>
+    /// <remarks>
+    /// igbinary and APCu are added when the resource is created, so this method's job is mostly to undo them.
+    /// Removing rather than conditionally adding keeps the default in one place, and means the order of the
+    /// fluent calls cannot change the result.
+    /// </remarks>
     private static void ApplySerializers<T>(IResourceBuilder<T> builder, PhpOptimizationOptions options)
         where T : IPhpResource
     {
-        if (options.Igbinary)
+        builder.Resource.TryGetLastAnnotation<PhpExtensionAnnotation>(out var extensions);
+        builder.Resource.TryGetLastAnnotation<PhpIniSettingAnnotation>(out var iniSettings);
+
+        if (!options.Igbinary)
         {
-            builder
-                .WithPhpExtension("igbinary")
-                .WithPhpIniSetting("session.serialize_handler", "igbinary");
+            extensions?.Remove(PhpExtensions.Igbinary);
+
+            // Both settings name igbinary, so neither can survive it being removed.
+            iniSettings?.Settings.Remove("session.serialize_handler");
+            iniSettings?.Settings.Remove("apc.serializer");
         }
 
-        if (options.Apcu)
+        if (!options.Apcu)
         {
-            builder.WithPhpExtension("apcu");
-
-            if (options.Igbinary)
-            {
-                // Halves what every cache store and fetch has to serialize.
-                builder.WithPhpIniSetting("apc.serializer", "igbinary");
-            }
+            extensions?.Remove(PhpExtensions.Apcu);
+            iniSettings?.Settings.Remove("apc.serializer");
         }
 
         if (options.IgbinaryForRedis)
         {
             // The rebuild itself happens in the generated Dockerfile, which reads the annotation. Requesting
             // the extension here keeps the two consistent when only this option is set.
-            builder.WithPhpExtension("redis");
+            builder.WithPhpExtension(PhpExtensions.Redis);
         }
     }
 

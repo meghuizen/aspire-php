@@ -12,18 +12,38 @@ public class PhpDockerfileGeneratorTests
         var dockerfile = RenderWorker(php => php.WithPhpExtension("pdo_pgsql").WithPhpExtension("redis"));
 
         Assert.Contains("USER root", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("RUN install-php-extensions pdo_pgsql redis", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("RUN install-php-extensions igbinary apcu pdo_pgsql redis", dockerfile, StringComparison.Ordinal);
 
         // Dropping back to the unprivileged user is the whole point of choosing these images.
         Assert.Contains("USER www-data", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Publish_DoesNotSwitchToRootWhenNothingNeedsIt()
+    public void Publish_InstallsIgbinaryAndApcuByDefault()
     {
+        // Both are on by default, so a plain resource still gets the serializer wiring.
         var dockerfile = RenderWorker(php => php);
 
-        Assert.DoesNotContain("USER root", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("RUN install-php-extensions igbinary apcu", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("apc.serializer=igbinary", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("session.serialize_handler=igbinary", dockerfile, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Publish_DoesNotSwitchToRootWhenTheDefaultsAreTurnedOff()
+    {
+        // With nothing to install and no ini to write, the image never needs to leave the unprivileged user.
+        var dockerfile = RenderWorker(php => php.WithPhpOptimizations(o =>
+        {
+            o.Igbinary = false;
+            o.Apcu = false;
+            o.Opcache = false;
+
+            // The realpath cache is an ini setting, which is what would otherwise force a root step.
+            o.RealpathCacheSizeKilobytes = 0;
+        }));
+
+        Assert.DoesNotContain("install-php-extensions", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,7 +53,7 @@ public class PhpDockerfileGeneratorTests
             .WithPhpExtension("redis", "pdo_pgsql")
             .WithPhpExtension("redis", "opentelemetry"));
 
-        Assert.Contains("RUN install-php-extensions redis pdo_pgsql opentelemetry", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("RUN install-php-extensions igbinary apcu redis pdo_pgsql opentelemetry", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -45,7 +65,7 @@ public class PhpDockerfileGeneratorTests
 
         // Sorted, so the generated Dockerfile is byte-identical between runs and Docker layer caching holds.
         Assert.Contains(
-            @"RUN printf '%s\n%s\n' max_execution_time=30 memory_limit=512M > /usr/local/etc/php/conf.d/zzzz-aspire.ini",
+            @"RUN printf '%s\n%s\n%s\n%s\n' apc.serializer=igbinary max_execution_time=30 memory_limit=512M session.serialize_handler=igbinary > /usr/local/etc/php/conf.d/zzzz-aspire.ini",
             dockerfile,
             StringComparison.Ordinal);
     }
@@ -148,7 +168,7 @@ public class PhpDockerfileGeneratorTests
 
             var dockerfile = PhpTestBuilder.RenderDevDockerfile(php.Resource);
 
-            Assert.Contains("RUN install-php-extensions redis", dockerfile, StringComparison.Ordinal);
+            Assert.Contains("RUN install-php-extensions igbinary apcu redis", dockerfile, StringComparison.Ordinal);
 
             // The source arrives through a bind mount, so copying it would shadow the mount and stale the image.
             Assert.DoesNotContain("COPY", dockerfile, StringComparison.Ordinal);
