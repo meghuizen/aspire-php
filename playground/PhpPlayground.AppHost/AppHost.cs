@@ -1,3 +1,5 @@
+using Aspire.Hosting.PHP;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 // Gives `aspire publish` somewhere to publish to. Without a compute environment it emits nothing.
@@ -12,6 +14,7 @@ builder.AddPhpWebApp("web", "../php-web")
        .WithComposer()
        .WithOpenTelemetry()
        .WithPhpIniSetting("memory_limit", "512M")
+       .WithHealthCheck()
        .WithPhpOptimizations(options =>
        {
            // Keeps the framework's classes resident instead of linking them on every request.
@@ -31,6 +34,7 @@ builder.AddPhpWebApp("data", "../php-db")
        .WithComposer()
        .WithDatabaseReference(db)
        .WithCacheReference(cache)
+       .WithPhpConsoleCommand("seed", PhpConsoleCommandKind.OneShot, "seed.php")
        .WaitFor(db)
        .WaitFor(cache)
        .WithExternalHttpEndpoints();

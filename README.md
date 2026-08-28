@@ -69,6 +69,11 @@ a container, which has to be settled when the resource is created.
 | `WithXdebug(port?)` | Xdebug environment; installs the extension in container mode |
 | `WithWorkerMode(workerScript?)` | FrankenPHP worker mode. Web apps only |
 | `WithPhpVersion(version)` | Pins the image tag and the version required of a local PHP |
+| `WithMigrations(args?)` | Runs migrations once before the app starts |
+| `WithQueueWorker(name?, args?)` | Long-running queue consumer |
+| `WithScheduler(args?)` | Long-running scheduler |
+| `WithPhpConsoleCommand(name, kind, args)` | Any console command, one-shot or long-running |
+| `WithHealthCheck(path?, statusCode?)` | HTTP health check. Web apps only |
 | `WithPhpOptimizations(configure?)` | OPcache, igbinary, APCu, realpath cache and Composer autoloader tuning |
 | `WithDatabaseReference(db, ...)` | Translates a database reference into the names the app reads |
 | `WithCacheReference(cache, ...)` | Translates a cache reference; always sets `REDIS_URL` |
@@ -224,6 +229,65 @@ develop on exactly the version you deploy.
 Each is `AddPhpWebApp` with that application's document root, PHP extensions and naming already set, so
 everything on a plain PHP resource still applies. WordPress and Joomla serve from their own root rather than a
 `public/` subdirectory, which is why their document root is `.`.
+
+## Console commands, workers and schedulers
+
+A framework application is rarely just a web endpoint. Migrations have to run before it starts, queues need
+consuming, and schedules need ticking — each as its own resource in the dashboard, with its own logs.
+
+```csharp
+var db = builder.AddMySql("mysql").AddDatabase("shopdb");
+
+builder.AddLaravelApp("shop", "../shop")
+       .WithDatabaseReference(db)
+       .WaitFor(db)
+       .WithMigrations()                 // runs once; the app waits for it
+       .WithQueueWorker()                // runs until stopped; waits for migrations
+       .WithQueueWorker("emails", "artisan", "queue:work", "--queue=emails")
+       .WithScheduler();
+```
+
+| Method | Default command | Runs |
+|---|---|---|
+| `WithMigrations(args?)` | Laravel `artisan migrate --force`, Symfony `doctrine:migrations:migrate`, Drupal `drush updatedb` | Once. The app waits for it |
+| `WithQueueWorker(name?, args?)` | Laravel `artisan queue:work`, Symfony `messenger:consume async` | Until stopped |
+| `WithScheduler(args?)` | Laravel `artisan schedule:work`, Symfony `messenger:consume scheduler_default` | Until stopped |
+| `WithPhpConsoleCommand(name, kind, args)` | — | Whichever you choose |
+
+Each command runs in **the same environment as the application** — same image, same extensions, same database
+and cache variables — so it sees exactly what the application sees.
+
+It also **inherits the application's `WaitFor`**. Without that, `WaitFor(db)` on the app would leave migrations
+racing the database, and migrations run first, so they would lose.
+
+WordPress and Joomla have no migration or queue concept. Asking for one says so, naming the framework, rather
+than inventing a command.
+
+Console commands are **not created when publishing** — they would run on the machine doing the publish, which is
+the wrong machine. Migrations belong to a deployment step, not to building an image.
+
+### Worker concurrency
+
+Aspire's `WithReplicas` is limited to project resources, so it is not available here. Scale with the worker's
+own options — Laravel Horizon, or `queue:work` arguments — or add a second `WithQueueWorker` with its own name.
+
+## Health checks
+
+```csharp
+builder.AddLaravelApp("shop", "../shop")
+       .WithHealthCheck();        // GET /healthcheck, expects 200
+```
+
+Without this a resource reports running the moment its process starts, which for a web application says very
+little — the server can be up while every request fails. It also makes `WaitFor` meaningful, since dependents
+then wait for the application to actually answer.
+
+The default path is answered by the web server itself, so it stays green even when PHP is broken. Point it at
+one of your own routes to check the application instead:
+
+```csharp
+.WithHealthCheck("/up")           // Laravel's built-in health route
+```
 
 ## Databases and caches
 
@@ -415,6 +479,9 @@ Verified end to end against real containers:
 - PHP 8.5 and 8.4 both selected and running
 - OPcache, preloading (5 scripts loaded), igbinary for APCu and sessions, an enlarged realpath cache and an
   igbinary-capable Redis extension, all confirmed live with `ini_get` inside the built image
+- Console commands: a seed step connected to MySQL through the inherited variables, exited 0, and the app
+  started only after it
+- Health checks: Aspire registered and passed an HTTP check on the one resource that asked for it
 - Cross-platform CI on Linux, Windows and macOS
 
 Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and
