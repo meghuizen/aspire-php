@@ -128,7 +128,8 @@ internal static class PhpDockerfileGenerator
     {
         var needsRoot = options.Extensions.Count > 0
             || options.IniSettings.Count > 0
-            || options.SystemPackages.Count > 0;
+            || options.SystemPackages.Count > 0
+            || options.WriteForwardedHeaderShim;
 
         if (!needsRoot)
         {
@@ -202,12 +203,24 @@ internal static class PhpDockerfileGenerator
             stage.EmptyLine();
         }
 
+        if (options.WriteForwardedHeaderShim)
+        {
+            WriteForwardedHeaderShim(stage);
+        }
+
         // Preload is deliberately excluded here and written at the very end instead. It names a file that
         // Composer has not created yet, and PHP fails to start at all when opcache.preload points at a
         // missing file — which would break the composer install a few lines below.
         var startupSettings = options.IniSettings
             .Where(setting => !IsPreloadSetting(setting.Key))
             .ToList();
+
+        if (options.WriteForwardedHeaderShim)
+        {
+            startupSettings.Add(new KeyValuePair<string, string>(
+                "auto_prepend_file",
+                PhpHostingExtensions.ForwardedHeaderShimPath));
+        }
 
         if (startupSettings.Count > 0)
         {
@@ -221,6 +234,32 @@ internal static class PhpDockerfileGenerator
 
         stage
             .User(PhpImages.ContainerUser)
+            .EmptyLine();
+    }
+
+    /// <summary>
+    /// Writes the <c>$_SERVER</c> shim and points <c>auto_prepend_file</c> at it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Base64 rather than a heredoc or a printf: the content is PHP, so it is full of quotes, dollar signs
+    /// and brackets that every shell treats as special. Encoding it removes the question entirely, and
+    /// <c>base64 -d</c> is present on both Alpine's busybox and Debian's coreutils.
+    /// </para>
+    /// <para>
+    /// Written before the ini settings so the file already exists by the time PHP is next invoked. PHP warns
+    /// on every invocation when <c>auto_prepend_file</c> names a missing file, which would otherwise litter
+    /// the Composer output later in the build.
+    /// </para>
+    /// </remarks>
+    private static void WriteForwardedHeaderShim(DockerfileStage stage)
+    {
+        var encoded = Convert.ToBase64String(
+            System.Text.Encoding.UTF8.GetBytes(PhpHostingExtensions.ForwardedHeaderShimContent));
+
+        stage
+            .Comment("Populate $_SERVER from the forwarded headers: the platform terminates TLS at its ingress")
+            .Run($"echo '{encoded}' | base64 -d > {PhpHostingExtensions.ForwardedHeaderShimPath}")
             .EmptyLine();
     }
 

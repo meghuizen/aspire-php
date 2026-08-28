@@ -66,6 +66,10 @@ internal static class PhpConnectionMapper
                 Set(environment, prefix ?? "DATABASE_URL", uri);
                 break;
 
+            case PhpConnectionConvention.Azure:
+                ApplyAzureDatabase(host, port, username, password, databaseName, uri, driver, prefix, environment);
+                break;
+
             case PhpConnectionConvention.WordPress:
                 // WordPress takes host and port as a single value, not two.
                 Set(environment, "WORDPRESS_DB_HOST", CombineHostAndPort(host, port));
@@ -116,6 +120,73 @@ internal static class PhpConnectionMapper
     }
 
     /// <summary>
+    /// The CA bundle path Azure Database for MySQL is reached through.
+    /// </summary>
+    /// <remarks>
+    /// Azure requires TLS. PDO needs to be told where the trust store is, and without it the connection fails
+    /// with an error that reads like the server is unreachable rather than like a certificate problem. This
+    /// path is the distribution's own bundle and exists in both the Alpine and Debian base images.
+    /// </remarks>
+    public const string MySqlCaBundlePath = "/etc/ssl/certs/ca-certificates.crt";
+
+    /// <summary>
+    /// Writes the names Azure Service Connector uses, which is also what Microsoft's PHP tutorials read.
+    /// </summary>
+    private static void ApplyAzureDatabase(
+        ReferenceExpression? host,
+        ReferenceExpression? port,
+        ReferenceExpression? username,
+        ReferenceExpression? password,
+        ReferenceExpression? databaseName,
+        ReferenceExpression? uri,
+        PhpDatabaseDriver driver,
+        string? prefix,
+        IDictionary<string, object> environment)
+    {
+        if (driver == PhpDatabaseDriver.PostgreSql)
+        {
+            var postgres = prefix ?? "AZURE_POSTGRESQL";
+
+            // Service Connector's PHP client type hands over one libpq keyword string rather than parts,
+            // because that is what pg_connect takes. The parts are set as well, for an application using PDO.
+            if (host is not null && databaseName is not null)
+            {
+                var connectionString = port is null
+                    ? ReferenceExpression.Create($"host={host} dbname={databaseName} sslmode=require")
+                    : ReferenceExpression.Create($"host={host} port={port} dbname={databaseName} sslmode=require");
+
+                Set(environment, $"{postgres}_CONNECTIONSTRING", username is null
+                    ? connectionString
+                    : ReferenceExpression.Create($"{connectionString} user={username}"));
+            }
+
+            Set(environment, $"{postgres}_HOST", host);
+            Set(environment, $"{postgres}_PORT", port);
+            Set(environment, $"{postgres}_DATABASE", databaseName);
+            Set(environment, $"{postgres}_USERNAME", username);
+            Set(environment, $"{postgres}_PASSWORD", password);
+            environment[$"{postgres}_SSL"] = "true";
+            return;
+        }
+
+        var mysql = prefix ?? "AZURE_MYSQL";
+
+        Set(environment, $"{mysql}_HOST", host);
+        Set(environment, $"{mysql}_PORT", port);
+
+        // DBNAME rather than DATABASE. Service Connector's spelling, and an application copied from the
+        // tutorial reads exactly that.
+        Set(environment, $"{mysql}_DBNAME", databaseName);
+        Set(environment, $"{mysql}_USERNAME", username);
+        Set(environment, $"{mysql}_PASSWORD", password);
+
+        environment["MYSQL_ATTR_SSL_CA"] = MySqlCaBundlePath;
+
+        // Kept as a fallback for an application that reads a DSN, since the Azure names carry no scheme.
+        Set(environment, "DATABASE_URL", uri);
+    }
+
+    /// <summary>
     /// Writes the cache environment variables for a convention.
     /// </summary>
     public static void ApplyCache(
@@ -142,6 +213,18 @@ internal static class PhpConnectionMapper
         {
             case PhpConnectionConvention.Symfony:
                 Set(environment, prefix ?? "REDIS_URL", uri);
+                break;
+
+            case PhpConnectionConvention.Azure:
+                var azurePrefix = prefix ?? "AZURE_REDIS";
+                Set(environment, $"{azurePrefix}_HOST", host);
+                Set(environment, $"{azurePrefix}_PORT", port);
+                Set(environment, $"{azurePrefix}_PASSWORD", password);
+                environment[$"{azurePrefix}_DATABASE"] = "0";
+
+                // Azure Managed Redis is TLS only, on 10000 rather than 6379. An application that connects
+                // in plaintext gets a read error saying nothing about TLS, so the flag is always stated.
+                environment[$"{azurePrefix}_SSL"] = "true";
                 break;
 
             case PhpConnectionConvention.Laravel:
@@ -177,6 +260,50 @@ internal static class PhpConnectionMapper
                 Set(environment, $"{genericPrefix}_PASSWORD", password);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Builds the <c>session.save_path</c> the phpredis session handler expects.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately not built from the connection URI. The handler parses this string itself and its grammar
+    /// is not a URL's: the scheme is <c>tcp</c> or <c>tls</c> rather than <c>redis</c>, and the password is an
+    /// <c>auth</c> query parameter rather than userinfo before the host. Handing it a <c>redis://user:pass@host</c>
+    /// URL — which is what the resource's own URI is — produces a handler that fails to connect at runtime with
+    /// nothing useful in the message.
+    /// </para>
+    /// <para>
+    /// Whether the connection is encrypted cannot be read here, because the parts arrive as unresolved
+    /// expressions. The caller states it instead; <c>tcp</c> is the default because that is what a published
+    /// Redis is, and a run-mode Aspire Redis with TLS on needs it said explicitly.
+    /// </para>
+    /// </remarks>
+    public static ReferenceExpression? BuildSessionSavePath(
+        IReadOnlyDictionary<string, ReferenceExpression> properties,
+        bool useTls)
+    {
+        var host = properties.GetValueOrDefault(HostProperty);
+
+        if (host is null)
+        {
+            return null;
+        }
+
+        var password = properties.GetValueOrDefault(PasswordProperty);
+        var port = properties.GetValueOrDefault(PortProperty);
+        var scheme = useTls ? "tls" : "tcp";
+
+        // Built as one expression rather than composed from smaller ones. Nesting a ReferenceExpression
+        // inside another collapses it to a single placeholder, which resolves correctly but leaves the
+        // scheme invisible to anything reading the format -- including a test trying to assert it is right.
+        return (port, password) switch
+        {
+            (null, null) => ReferenceExpression.Create($"{scheme}://{host}"),
+            (not null, null) => ReferenceExpression.Create($"{scheme}://{host}:{port}"),
+            (null, not null) => ReferenceExpression.Create($"{scheme}://{host}?auth={password}"),
+            _ => ReferenceExpression.Create($"{scheme}://{host}:{port}?auth={password}")
+        };
     }
 
     /// <summary>

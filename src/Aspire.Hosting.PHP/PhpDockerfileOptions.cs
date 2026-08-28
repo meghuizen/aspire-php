@@ -31,6 +31,15 @@ internal sealed record PhpDockerfileOptions
     public required bool ClassmapAuthoritative { get; init; }
 
     /// <summary>
+    /// Write the <c>$_SERVER</c> shim that populates HTTPS and host from the forwarded headers.
+    /// </summary>
+    /// <remarks>
+    /// Only for the applications that read those keys directly instead of an environment variable, which is
+    /// WordPress, Joomla and Drupal. Laravel and Symfony are configured through the environment instead.
+    /// </remarks>
+    public required bool WriteForwardedHeaderShim { get; init; }
+
+    /// <summary>
     /// Reads the options off a PHP resource.
     /// </summary>
     /// <param name="resource">The PHP resource carrying the annotations.</param>
@@ -67,8 +76,36 @@ internal sealed record PhpDockerfileOptions
             SystemPackages = systemPackages?.Packages ?? [],
             IniSettings = iniSettings?.Settings ?? new SortedDictionary<string, string>(StringComparer.Ordinal),
             RebuildRedisForIgbinary = optimization?.Options.IgbinaryForRedis ?? false,
-            ClassmapAuthoritative = optimization?.Options.ComposerClassmapAuthoritative ?? false
+            ClassmapAuthoritative = optimization?.Options.ComposerClassmapAuthoritative ?? false,
+            // Skipped when the application already has an auto_prepend_file: PHP allows exactly one, so ours
+            // would either be ignored or replace theirs. Writing the file anyway would leave the image
+            // carrying something nothing references.
+            WriteForwardedHeaderShim = isWeb
+                && NeedsForwardedHeaderShim(resource)
+                && !(iniSettings?.Settings.ContainsKey("auto_prepend_file") ?? false)
         };
+    }
+
+    /// <summary>
+    /// Whether this application reads <c>$_SERVER</c> directly rather than a trusted-proxy environment
+    /// variable, and so needs the shim written into the image.
+    /// </summary>
+    /// <remarks>
+    /// An explicit opt-out suppresses it. Nothing is written when the caller never asked for proxy awareness
+    /// either, which is the run-mode case: there is no proxy in front of a local process.
+    /// </remarks>
+    private static bool NeedsForwardedHeaderShim(IPhpResource resource)
+    {
+        if (resource.TryGetLastAnnotation<PhpTrustedProxyAnnotation>(out var proxies) && proxies.IsOptedOut)
+        {
+            return false;
+        }
+
+        var convention = resource.TryGetLastAnnotation<PhpConnectionConventionAnnotation>(out var annotation)
+            ? annotation.Convention
+            : PhpConnectionConvention.Generic;
+
+        return PhpHostingExtensions.NeedsForwardedHeaderShim(convention);
     }
 
     private static string ResolveImage(DockerfileBaseImageAnnotation? baseImages, IPhpResource resource, bool isWeb)

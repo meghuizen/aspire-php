@@ -296,6 +296,8 @@ public static partial class PhpHostingExtensions
         }
 
         ConfigureCommon(builder, resourceBuilder, appDirectory, isWeb, usesContainer: false);
+        ConfigureTrustedProxies(builder, resourceBuilder, isWeb);
+        WarnAboutLocalSessions(builder, resourceBuilder, isWeb);
         ConfigurePublish(builder, resourceBuilder, resource, appDirectory);
 
         return resourceBuilder;

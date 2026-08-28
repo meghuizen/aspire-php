@@ -46,6 +46,54 @@ public static partial class PhpHostingExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.WithHttpHealthCheck(path ?? DefaultHealthCheckPath, statusCode, endpointName: "http");
+        var resolvedPath = path ?? DefaultHealthCheckPath;
+
+        // A dashboard health check on its own stops at the dashboard. Probes are the separate API that
+        // deployment targets read, and are translated into Container Apps probes, Kubernetes probes and
+        // Compose health checks. Registering only the check leaves every target knowing nothing.
+        //
+        // Suppressed at the call site rather than project-wide, so that when the probe API changes this stops
+        // compiling instead of quietly doing nothing.
+#pragma warning disable ASPIREPROBES001
+        // Readiness goes through WithHttpProbe because that also registers the dashboard health check, which
+        // is what WaitFor keys off. Readiness is the right one to tie it to: it is the probe that answers
+        // "can this take traffic", which is exactly what a dependent is waiting to know.
+        builder.WithHttpProbe(
+            ProbeType.Readiness,
+            resolvedPath,
+            periodSeconds: 5,
+            timeoutSeconds: 3,
+            endpointName: "http");
+
+        // The other two are added as annotations directly. WithHttpProbe would register a second health check
+        // under the same key -- endpoint, path and status code -- and Aspire rejects the duplicate.
+        var endpoint = builder.Resource.GetEndpoint("http");
+
+        builder
+            // Slack on purpose: an image with OPcache preloading and a large autoloader can take tens of
+            // seconds to answer its first request, and a tight startup probe kills the container before it
+            // ever finishes booting.
+            .WithAnnotation(new EndpointProbeAnnotation
+            {
+                Type = ProbeType.Startup,
+                EndpointReference = endpoint,
+                Path = resolvedPath,
+                InitialDelaySeconds = 5,
+                PeriodSeconds = 3,
+                FailureThreshold = 20
+            })
+            // Slack for a different reason: PHP-FPM with every worker busy is slow to answer without being
+            // dead, and restarting it under load makes the overload worse rather than better.
+            .WithAnnotation(new EndpointProbeAnnotation
+            {
+                Type = ProbeType.Liveness,
+                EndpointReference = endpoint,
+                Path = resolvedPath,
+                PeriodSeconds = 30,
+                FailureThreshold = 3
+            });
+#pragma warning restore ASPIREPROBES001
+
+        return builder;
     }
 }

@@ -34,6 +34,9 @@ builder.AddPhpWebApp("data", "../php-db")
        .WithComposer()
        .WithDatabaseReference(db)
        .WithCacheReference(cache)
+       // Sessions in Redis rather than on local disk. A published app runs more than one replica, and PHP's
+       // file sessions do not survive a request landing on a different one.
+       .WithSessionStore(cache)
        .WithPhpConsoleCommand("seed", PhpConsoleCommandKind.OneShot, "seed.php")
        .WaitFor(db)
        .WaitFor(cache)
@@ -53,6 +56,9 @@ builder.AddPhpWebApp("data-pg", "../php-db")
 // the trade for the only web server here that reads those files.
 builder.AddPhpApacheApp("legacy", "../php-legacy")
        .WithHealthCheck()
+       // Nothing shared to move sessions to here, and one replica is fine for a sample. Saying so keeps the
+       // scale-out warning for the applications that have not thought about it.
+       .WithoutSharedSessions()
        .WithExternalHttpEndpoints();
 
 // The traditional nginx + PHP-FPM pairing, selected with the enum rather than a dedicated method.

@@ -94,21 +94,44 @@ public static partial class PhpHostingExtensions
     /// </summary>
     /// <typeparam name="T">The PHP resource type.</typeparam>
     /// <param name="builder">The resource builder.</param>
+    /// <param name="cron">
+    /// The schedule a deployment target should invoke the command on. Defaults to every minute. Ignored
+    /// during <c>aspire run</c>, where the framework's own scheduler keeps time.
+    /// </param>
     /// <param name="args">Overrides the command. Defaults to the framework's own scheduler command.</param>
     /// <returns>A reference to the resource builder.</returns>
     /// <remarks>
-    /// Laravel's <c>schedule:work</c> ticks every minute itself, so no cron daemon is involved. Symfony's
-    /// scheduler runs as a Messenger transport, which is what is started here.
+    /// <para>
+    /// Laravel's <c>schedule:work</c> ticks every minute itself, so no cron daemon is involved during
+    /// <c>aspire run</c>. Symfony's scheduler runs as a Messenger transport, which is what is started here.
+    /// </para>
+    /// <para>
+    /// A deployment target with a scheduler of its own uses <paramref name="cron"/> instead, and runs the
+    /// command once per tick rather than leaving a process alive to count minutes. That is both cheaper and
+    /// more reliable: a process counting minutes stops counting when the container is recycled.
+    /// </para>
     /// </remarks>
-    public static IResourceBuilder<T> WithScheduler<T>(this IResourceBuilder<T> builder, params string[] args)
+    public static IResourceBuilder<T> WithScheduler<T>(
+        this IResourceBuilder<T> builder,
+        string? cron = null,
+        params string[] args)
         where T : IPhpResource
     {
         ArgumentNullException.ThrowIfNull(builder);
 
         var resolved = ResolveFrameworkCommand(builder.Resource, args, PhpFrameworkCommands.Scheduler, "a scheduler");
 
-        return builder.WithPhpConsoleCommand("scheduler", PhpConsoleCommandKind.LongRunning, resolved);
+        // Every minute, because that is the cadence both Laravel's and Symfony's schedulers assume: they do
+        // their own dispatch decisions and expect to be asked often enough not to miss one.
+        return builder.WithPhpConsoleCommand(
+            "scheduler",
+            PhpConsoleCommandKind.Scheduled,
+            cron ?? DefaultSchedulerCron,
+            resolved);
     }
+
+    /// <summary>The cadence Laravel's and Symfony's schedulers are designed to be invoked at.</summary>
+    private const string DefaultSchedulerCron = "* * * * *";
 
     /// <summary>
     /// Runs any PHP console command alongside the application.
@@ -129,6 +152,15 @@ public static partial class PhpHostingExtensions
         PhpConsoleCommandKind kind,
         params string[] args)
         where T : IPhpResource
+        => builder.WithPhpConsoleCommand(name, kind, cron: null, args);
+
+    private static IResourceBuilder<T> WithPhpConsoleCommand<T>(
+        this IResourceBuilder<T> builder,
+        string name,
+        PhpConsoleCommandKind kind,
+        string? cron,
+        params string[] args)
+        where T : IPhpResource
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -137,13 +169,6 @@ public static partial class PhpHostingExtensions
         if (args.Length == 0)
         {
             throw new ArgumentException("A console command needs at least one argument.", nameof(args));
-        }
-
-        // Publishing does not run console commands: they would run on the machine doing the publish, which is
-        // the wrong machine. Migrations belong to the deployment, not to building an image.
-        if (!builder.ApplicationBuilder.ExecutionContext.IsRunMode)
-        {
-            return builder;
         }
 
         var applicationBuilder = builder.ApplicationBuilder;
@@ -161,18 +186,66 @@ public static partial class PhpHostingExtensions
 
         commandBuilder
             .WithParentRelationship(resource)
-            .ExcludeFromManifest()
+            .WithAnnotation(new PhpConsoleKindAnnotation(kind, cron), ResourceAnnotationMutationBehavior.Replace)
             .WithIconName(kind == PhpConsoleCommandKind.OneShot ? "DatabaseArrowUp" : "Whiteboard");
 
-        // Everything the application knows about its backing services applies to the command too, so both the
-        // environment and the waits are copied rather than reconfigured. Done at start so that references and
-        // WaitFor calls made after this one are still picked up.
-        applicationBuilder.OnBeforeStart((_, _) =>
+        // The command sees exactly what the application sees. Replaying the application's own callbacks at
+        // resolution time rather than copying them now means references and WaitFor calls made after this one
+        // are still picked up, and it works identically in run and publish mode — an OnBeforeStart hook would
+        // not, because publishing never starts anything.
+        commandBuilder.WithEnvironment(async context =>
         {
-            CopyEnvironmentCallbacks(resource, commandBuilder);
-            CopyBackingServiceWaits(resource, commandBuilder);
-            return Task.CompletedTask;
+            if (!resource.TryGetAnnotationsOfType<EnvironmentCallbackAnnotation>(out var callbacks))
+            {
+                return;
+            }
+
+            foreach (var callback in callbacks)
+            {
+                await callback.Callback(context).ConfigureAwait(false);
+            }
         });
+
+        if (applicationBuilder.ExecutionContext.IsRunMode)
+        {
+            // Deferred to start so that WaitFor calls made after this one are still picked up. Publishing has
+            // no such event, so it copies the waits directly below and accepts the ordering constraint.
+            applicationBuilder.OnBeforeStart((_, _) =>
+            {
+                CopyBackingServiceWaits(resource, commandBuilder);
+                return Task.CompletedTask;
+            });
+
+            // Nothing outside the AppHost needs to know about a command that only exists while the dashboard
+            // is up. Publishing is the opposite case: the manifest is the only way the deployment learns that
+            // migrations and workers exist at all.
+            ConfigureRunModeConsoleWaits(builder, commandBuilder, applicationBuilder, resource, kind);
+        }
+        else
+        {
+            ConfigurePublishedConsoleCommand(commandBuilder, resource);
+            CopyBackingServiceWaits(resource, commandBuilder);
+
+            if (kind == PhpConsoleCommandKind.OneShot)
+            {
+                // Compose renders this as depends_on/service_completed_successfully. Container Apps has no
+                // equivalent, so B1 sequences jobs explicitly; the relationship is still worth stating.
+                builder.WaitForCompletion(commandBuilder);
+            }
+        }
+
+        return builder;
+    }
+
+    private static void ConfigureRunModeConsoleWaits<T>(
+        IResourceBuilder<T> builder,
+        IResourceBuilder<IPhpConsoleResource> commandBuilder,
+        IDistributedApplicationBuilder applicationBuilder,
+        IPhpResource resource,
+        PhpConsoleCommandKind kind)
+        where T : IPhpResource
+    {
+        commandBuilder.ExcludeFromManifest();
 
         if (kind == PhpConsoleCommandKind.OneShot)
         {
@@ -184,8 +257,44 @@ public static partial class PhpHostingExtensions
             // A worker started against a stale schema fails in ways that look like application bugs.
             commandBuilder.WaitForCompletion(migrations);
         }
+    }
 
-        return builder;
+    /// <summary>
+    /// Gives a published console command an image of its own.
+    /// </summary>
+    /// <remarks>
+    /// The command needs the same image as the application: the same extensions, the same ini settings, the
+    /// same source. That is the same Dockerfile against the same build context, so the layers are identical
+    /// and the second build is a cache hit rather than a second compile of every extension.
+    /// </remarks>
+    private static void ConfigurePublishedConsoleCommand(
+        IResourceBuilder<IPhpConsoleResource> commandBuilder,
+        IPhpResource resource)
+    {
+        if (commandBuilder is not IResourceBuilder<PhpConsoleResource> executableBuilder)
+        {
+            return;
+        }
+
+        var appDirectory = resource.AppDirectory;
+
+        executableBuilder.PublishAsDockerFile(container =>
+        {
+            if (File.Exists(Path.Combine(appDirectory, "Dockerfile")))
+            {
+                return;
+            }
+
+            container.WithDockerfileBuilder(
+                appDirectory,
+                context => PhpDockerfileGenerator.WritePublishDockerfile(resource, context));
+
+            if (!File.Exists(Path.Combine(appDirectory, ".dockerignore"))
+                && container.Resource.TryGetLastAnnotation<DockerfileBuildAnnotation>(out var dockerfile))
+            {
+                dockerfile.BuildContextIgnoreContent ??= PhpDockerfileGenerator.DefaultBuildContextIgnoreContent;
+            }
+        });
     }
 
     private static IResourceBuilder<IPhpConsoleResource> CreateConsoleResource(

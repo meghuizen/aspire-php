@@ -75,7 +75,10 @@ a container, which has to be settled when the resource is created.
 | `WithQueueWorker(name?, args?)` | Long-running queue consumer |
 | `WithScheduler(args?)` | Long-running scheduler |
 | `WithPhpConsoleCommand(name, kind, args)` | Any console command, one-shot or long-running |
-| `WithHealthCheck(path?, statusCode?)` | HTTP health check. Web apps only |
+| `WithHealthCheck(path?, statusCode?)` | HTTP health check and startup, readiness and liveness probes. Web apps only |
+| `WithTrustedProxies(proxies?)` | Tells the app it is behind a TLS-terminating proxy. Automatic when publishing |
+| `WithSessionStore(cache)` | Sessions in Redis rather than on local disk, so replicas share them |
+| `WithoutSharedSessions()` | Says sessions are handled elsewhere, silencing the scale-out warning |
 | `WithPhpOptimizations(configure?)` | OPcache, igbinary, APCu, realpath cache and Composer autoloader tuning |
 | `WithDatabaseReference(db, ...)` | Translates a database reference into the names the app reads |
 | `WithCacheReference(cache, ...)` | Translates a cache reference; always sets `REDIS_URL` |
@@ -83,6 +86,19 @@ a container, which has to be settled when the resource is created.
 | `WithSmtp(host, port, ...)` | Full SMTP configuration for an external server |
 | `WithDataVolume(path, name?)` | Persists uploads across container restarts |
 | `WithDockerfileBaseImage(runtimeImage:)` | Aspire built-in. Overrides the base image |
+
+### Azure
+
+Opt-in. Nothing here runs unless you call it, and .NET does not load an assembly until a method touching it
+runs — so an AppHost publishing to Docker Compose or Kubernetes never loads the Azure ones.
+
+| Method | Effect |
+|---|---|
+| `WithAzureContainerApps()` | Shapes console commands: jobs for one-shot and scheduled, no scale-to-zero for workers |
+| `WithAzureIdentity(identity)` | Assigns a user-assigned identity and publishes its client ID for the PHP side |
+| `WithKeyVaultReference(vault, secret, variable)` | Grants the identity read access; publishes the secret's name, not the secret |
+| `WithBlobStorageReference(storage, container)` | Grants blob write access. The better answer than a volume for uploads |
+| `PhpConnectionConvention.Azure` | The `AZURE_MYSQL_*` names Service Connector and Microsoft's tutorials use |
 
 ## Extensions
 
@@ -629,10 +645,106 @@ Verified end to end against real containers:
 - Mail: a plain `mail()` call reached MailPit through the sendmail shim, with the right From, To and Subject
 - Cross-platform CI on Linux, Windows and macOS
 
+- The PHP identity package's own test suite, run against PHP 8.5 in the same serversideup image this package
+  publishes: the token cache's refresh arithmetic and every failure message
+- `aspire publish` against the playground: console commands now appear as services of their own with the
+  parent's full environment, `TRUSTED_PROXIES` reaches every web app, and `session.save_path` resolves to
+  `tcp://cache:6379?auth=${CACHE_PASSWORD}` — the phpredis grammar, with the password still a placeholder
+  rather than baked into the image
+
 Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and
 variable names, and that is unit-tested, but no full WordPress, Laravel, Symfony, Drupal or Joomla installation
 has been stood up against them yet. Memcached is not covered — it has no Aspire integration and gets its own
 repository.
+
+**Nothing in the deployment work has been run against real Azure.** The manifest shaping is unit-tested and the
+PHP package's own logic is tested, but the following are written against documented contracts and not yet
+demonstrated, and should be read that way until this list moves upward:
+
+- a PHP application on Container Apps connecting to Azure Database for PostgreSQL with no password
+- the same against MySQL, which may not be possible at all from PDO — see [Passwordless databases](#passwordless-databases)
+- migrations running as a Container App Job and completing before the app takes traffic
+- a scheduled job firing on its cron
+- whether an Azure Files mount is writable by `www-data` in practice
+- the collector as a second container in the same Container App, which is designed but not yet built
+
+## Deploying
+
+`aspire publish` produces a container that any target will run. What that container does *not* do on its own
+is behave correctly once something other than your machine is in front of it, and that is what the deployment
+work here covers. Three of the four fixes are not Azure-specific and apply equally to Compose and Kubernetes.
+
+**Console commands now deploy.** Migrations, queue workers and schedulers used to exist only during
+`aspire run` and were silently absent from anything you published. They now reach the manifest, each carrying
+what kind it is, because a one-shot migration and a long-running worker are the same shape in the app model
+and a deployment target cannot guess which is which.
+
+**PHP is told it is behind a proxy.** Every target terminates TLS at the edge and forwards plain HTTP, so PHP
+would otherwise report an unencrypted request and build `http://` URLs — mixed content everywhere, and a
+redirect loop wherever the framework redirects to its canonical HTTP URL and the platform redirects back.
+Laravel and Symfony get the environment variables they read; WordPress, Joomla and Drupal read
+`$_SERVER['HTTPS']` directly, so those images get a small prepend file that fills it in from the forwarded
+headers. Applied automatically when publishing; `WithTrustedProxies("")` opts out.
+
+**Sessions.** PHP writes them to local disk, which is right for one replica and wrong for any other number.
+`WithSessionStore(cache)` shares them. Publishing without it, or without `WithoutSharedSessions()`, warns —
+the failure is users being logged out at random, which reads like an application bug rather than a deployment
+one.
+
+**Health checks reach the target.** `WithHealthCheck` registers startup, readiness and liveness probes as well
+as the dashboard check. The startup probe is deliberately patient: an image with OPcache preloading and a large
+autoloader can take tens of seconds to answer its first request, and a tight probe kills the container before
+it finishes booting.
+
+### Azure Container Apps
+
+```csharp
+var aca = builder.AddAzureContainerAppEnvironment("aca");
+var identity = builder.AddAzureUserAssignedIdentity("shop-identity");
+var vault = builder.AddAzureKeyVault("secrets");
+var storage = builder.AddAzureStorage("storage");
+
+builder.AddLaravelApp("shop", "../shop")
+       .WithMigrations()
+       .WithQueueWorker()
+       .WithScheduler()
+       .WithAzureIdentity(identity)
+       .WithKeyVaultReference(vault, "app-key", "APP_KEY_SECRET_NAME")
+       .WithBlobStorageReference(storage, "uploads")
+       .WithAzureContainerApps()
+       .WithExternalHttpEndpoints();
+```
+
+Aspire already turns the published container into a Container App, provisions a registry and pushes the image.
+`WithAzureContainerApps()` adds what it cannot infer: the migration becomes a manually triggered Container App
+Job, the scheduler a job on its cron, and the queue worker an app pinned to one replica — a worker allowed to
+scale to zero stops consuming the queue, and nothing arrives over HTTP to wake it up again.
+
+Two constraints are enforced rather than left to fail late. A Container App has exactly one external HTTP
+ingress, so a second external endpoint is rejected at publish time with both endpoints named. And a volume
+becomes an Azure Files mount whose owner cannot be changed — the ARM type carries no mount options at all — so
+using one warns and points at `WithBlobStorageReference`, which is the better answer for uploads anyway.
+
+### Passwordless databases
+
+There is no library for this in PHP. Microsoft's own documentation says so, and the Azure SDK for PHP was
+retired in 2021, so the companion package [`meghuizen/aspire-azure-identity`](php/aspire-azure-identity) calls
+the documented REST endpoint directly. `WithAzureIdentity` publishes the client ID and audience it reads.
+
+```php
+// Laravel, config/database.php
+'password' => \Meghuizen\AspireAzure\Identity::databasePassword(),
+```
+
+Tokens last between five and sixty minutes, so the package refreshes at four fifths of each one's life.
+Fetching once at container start looks correct and fails within the hour.
+
+**PostgreSQL first, and MySQL not yet claimed.** Postgres takes a token as an ordinary password over TLS.
+MySQL needs the `mysql_clear_password` plugin, and the sources disagree about whether PHP can use it:
+Microsoft's driver table lists both `mysqli` and `PDO_MYSQL` as supported, while
+[PHP bug #78467](https://bugs.php.net/bug.php?id=78467) says PDO cannot. Only a real connection settles that,
+so no MySQL claim is made here. `WithKeyVaultReference` covers MySQL in the meantime, which is what
+Microsoft's own flagship PHP tutorial does.
 
 ## Building
 
