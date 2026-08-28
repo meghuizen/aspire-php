@@ -12,6 +12,12 @@ builder.AddPhpWebApp("web", "../php-web")
        .WithComposer()
        .WithOpenTelemetry()
        .WithPhpIniSetting("memory_limit", "512M")
+       .WithPhpOptimizations(options =>
+       {
+           // Keeps the framework's classes resident instead of linking them on every request.
+           options.OpcachePreloadScript = "vendor/autoload.php";
+           options.IgbinaryForRedis = true;
+       })
        .WithExternalHttpEndpoints();
 
 // Backing services, and a PHP app that actually connects to them. This is what proves the reference

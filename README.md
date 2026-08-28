@@ -69,6 +69,10 @@ a container, which has to be settled when the resource is created.
 | `WithXdebug(port?)` | Xdebug environment; installs the extension in container mode |
 | `WithWorkerMode(workerScript?)` | FrankenPHP worker mode. Web apps only |
 | `WithPhpVersion(version)` | Pins the image tag and the version required of a local PHP |
+| `WithPhpOptimizations(configure?)` | OPcache, igbinary, APCu, realpath cache and Composer autoloader tuning |
+| `WithDatabaseReference(db, ...)` | Translates a database reference into the names the app reads |
+| `WithCacheReference(cache, ...)` | Translates a cache reference; always sets `REDIS_URL` |
+| `WithDataVolume(path, name?)` | Persists uploads across container restarts |
 | `WithDockerfileBaseImage(runtimeImage:)` | Aspire built-in. Overrides the base image |
 
 ## Choosing a PHP version
@@ -196,6 +200,58 @@ builder.AddWordPressApp("blog", "../blog")
        .WithDataVolume("wp-content/uploads");
 ```
 
+## Performance
+
+`WithPhpOptimizations()` applies the settings that actually move the needle for PHP:
+
+```csharp
+builder.AddLaravelApp("shop", "../shop")
+       .WithPhpOptimizations(options =>
+       {
+           options.OpcachePreloadScript = "vendor/autoload.php";
+           options.IgbinaryForRedis = true;
+       });
+```
+
+| Setting | Default | Why |
+|---|---|---|
+| `opcache.enable` | on when publishing, off when running | Stops PHP recompiling every file on every request. Off while running so an edit takes effect immediately |
+| `opcache.validate_timestamps` | off when publishing | The source in an image cannot change, so the check is a wasted stat per include per request |
+| `opcache.max_accelerated_files` | 20000 | A framework exceeds PHP's default of 10000, and files past the limit are silently recompiled every request — which looks like OPcache not working at all |
+| `opcache.memory_consumption` | 128 MB | |
+| `opcache.interned_strings_buffer` | 16 MB | |
+| `opcache.jit` | **off** | Large gains on numeric work, close to nothing on request handling, which is I/O bound. Measure before enabling |
+| `opcache.preload` | not set | Keeps framework classes resident instead of linking them per request. Publishing only |
+| `apcu` + `igbinary` | on | igbinary halves what a cache round-trip serializes |
+| `session.serialize_handler` | igbinary | |
+| `realpath_cache_size` | 4096 KB | PHP's default of 256 KB is far too small for a framework resolving thousands of include paths |
+| Composer autoloader | `--classmap-authoritative` | No filesystem fallback. Correct for a fixed image |
+
+Everything is applied as php.ini values, so it works the same for a local process and a container.
+
+### igbinary and Redis
+
+igbinary is a drop-in replacement for `serialize()` producing roughly half the bytes — measured at 28 vs 56 on a
+small nested array. It only affects things that get serialized, so it is a caching and session optimization,
+not a general speedup. The format is binary and PHP-specific: anything outside PHP that reads your cached data
+will not be able to.
+
+APCu and sessions pick it up automatically. Redis does not, because **the base images ship the Redis extension
+built without igbinary support**, and the extension installer refuses to replace an extension that is already
+present. `IgbinaryForRedis = true` uninstalls and rebuilds it, which adds about a minute to the image build.
+That makes `Redis::SERIALIZER_IGBINARY` available; your code still has to select it:
+
+```php
+$redis->setOption(Redis::OPT_SERIALIZER, Redis::SERIALIZER_IGBINARY);
+```
+
+### One trap worth knowing
+
+`opcache.preload` names a file that Composer only creates during the build, and **PHP refuses to start at all
+when preload points at a missing file**. Written in the obvious place, it breaks `composer install` a few lines
+later. The generated Dockerfile therefore appends the preload settings after the autoloader is built, not
+alongside the other ini values.
+
 ## Telemetry
 
 `WithOpenTelemetry()` handles the Aspire side. Your application still needs the SDK:
@@ -261,6 +317,8 @@ Verified end to end against real containers:
   and reading it back
 - **Redis over TLS** — connected, wrote and read back
 - PHP 8.5 and 8.4 both selected and running
+- OPcache, preloading (5 scripts loaded), igbinary for APCu and sessions, an enlarged realpath cache and an
+  igbinary-capable Redis extension, all confirmed live with `ini_get` inside the built image
 - Cross-platform CI on Linux, Windows and macOS
 
 Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and

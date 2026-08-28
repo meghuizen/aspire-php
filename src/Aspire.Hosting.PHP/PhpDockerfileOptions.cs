@@ -21,6 +21,12 @@ internal sealed record PhpDockerfileOptions
 
     public required IReadOnlyDictionary<string, string> IniSettings { get; init; }
 
+    /// <summary>Rebuild the Redis extension so it can serialize with igbinary.</summary>
+    public required bool RebuildRedisForIgbinary { get; init; }
+
+    /// <summary>Build a Composer autoloader with no filesystem fallback.</summary>
+    public required bool ClassmapAuthoritative { get; init; }
+
     /// <summary>
     /// Reads the options off a PHP resource.
     /// </summary>
@@ -44,6 +50,7 @@ internal sealed record PhpDockerfileOptions
         resource.TryGetLastAnnotation<PhpEnvironmentAnnotation>(out var environment);
         resource.TryGetLastAnnotation<PhpExtensionAnnotation>(out var extensions);
         resource.TryGetLastAnnotation<PhpIniSettingAnnotation>(out var iniSettings);
+        resource.TryGetLastAnnotation<PhpOptimizationAnnotation>(out var optimization);
 
         return new PhpDockerfileOptions
         {
@@ -53,7 +60,9 @@ internal sealed record PhpDockerfileOptions
                 || File.Exists(Path.Combine(resource.AppDirectory, "composer.json")),
             ScriptPath = NormalizeScriptPath(environment?.ScriptPath),
             Extensions = extensions?.Extensions ?? [],
-            IniSettings = iniSettings?.Settings ?? new SortedDictionary<string, string>(StringComparer.Ordinal)
+            IniSettings = iniSettings?.Settings ?? new SortedDictionary<string, string>(StringComparer.Ordinal),
+            RebuildRedisForIgbinary = optimization?.Options.IgbinaryForRedis ?? false,
+            ClassmapAuthoritative = optimization?.Options.ComposerClassmapAuthoritative ?? false
         };
     }
 

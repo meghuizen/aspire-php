@@ -87,3 +87,9 @@ internal sealed class PhpConnectionConventionAnnotation(PhpConnectionConvention 
 {
     public PhpConnectionConvention Convention { get; } = convention;
 }
+
+/// <summary>Carries the performance settings applied by <c>WithPhpOptimizations</c>.</summary>
+internal sealed class PhpOptimizationAnnotation(PhpOptimizationOptions options) : IResourceAnnotation
+{
+    public PhpOptimizationOptions Options { get; } = options;
+}

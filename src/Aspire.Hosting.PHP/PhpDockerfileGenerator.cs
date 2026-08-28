@@ -75,11 +75,17 @@ internal static class PhpDockerfileGenerator
         {
             // Deferred until the full source is present: the autoloader classmap has to see every class, and
             // scripts such as post-install-cmd routinely touch files that only exist in the complete tree.
+            // classmap-authoritative goes further than optimize: the autoloader never falls back to searching
+            // the filesystem, so a class miss is an error rather than a slow lookup. Correct for a fixed image.
+            var autoloaderFlag = options.ClassmapAuthoritative ? "--classmap-authoritative" : "--optimize";
+
             stage
                 .Comment("Build the optimized autoloader now the whole source tree is present")
-                .RunWithMounts("composer dump-autoload --optimize --no-dev --no-interaction", ComposerCacheMount)
+                .RunWithMounts($"composer dump-autoload {autoloaderFlag} --no-dev --no-interaction", ComposerCacheMount)
                 .EmptyLine();
         }
+
+        WritePreloadSettings(stage, options, resource.Name);
 
         if (options.IsWeb)
         {
@@ -136,35 +142,127 @@ internal static class PhpDockerfileGenerator
                 ValidateShellToken(extension, "PHP extension name", resourceName);
             }
 
-            stage
-                .Comment("PHP extensions")
-                .Run($"install-php-extensions {string.Join(" ", options.Extensions)}")
-                .EmptyLine();
-        }
+            // igbinary is installed on its own and first, because the Redis rebuild below only picks up
+            // igbinary support if igbinary is already present when Redis is built.
+            var ordered = options.RebuildRedisForIgbinary
+                ? options.Extensions.Where(e => !string.Equals(e, "igbinary", StringComparison.Ordinal))
+                : options.Extensions;
 
-        if (options.IniSettings.Count > 0)
-        {
-            foreach (var setting in options.IniSettings)
+            if (options.RebuildRedisForIgbinary)
             {
-                ValidateIniValue(setting.Key, "php.ini setting name", resourceName);
-                ValidateIniValue(setting.Value, $"php.ini value for '{setting.Key}'", resourceName);
+                stage
+                    .Comment("igbinary first: Redis only gains igbinary support if it is built against it")
+                    .Run("install-php-extensions igbinary");
             }
 
-            // printf with a %s per line rather than echo: echo's handling of backslashes and leading dashes
-            // differs between shells, and these values come from the caller.
-            var format = string.Join("", Enumerable.Repeat("%s\\n", options.IniSettings.Count));
-            var arguments = string.Join(
-                " ",
-                options.IniSettings.Select(setting => ShellQuote($"{setting.Key}={setting.Value}")));
+            var remaining = ordered.ToList();
+            if (remaining.Count > 0)
+            {
+                stage
+                    .Comment("PHP extensions")
+                    .Run($"install-php-extensions {string.Join(" ", remaining)}");
+            }
 
-            stage
-                .Comment("php.ini settings. The four z prefix sorts after the base image's own ini files.")
-                .Run($"printf '{format}' {arguments} > {PhpImages.PhpConfDirectory}/{PhpImages.GeneratedIniFileName}")
-                .EmptyLine();
+            if (options.RebuildRedisForIgbinary)
+            {
+                // The base image already ships Redis built without igbinary, and the installer refuses to
+                // replace an extension that is already present. Removing it first is the only way to get a
+                // build that links against igbinary.
+                stage
+                    .Comment("Rebuild Redis against igbinary")
+                    .Run(
+                        "pecl uninstall -r redis && " +
+                        $"rm -f {PhpImages.PhpConfDirectory}/docker-php-ext-redis.ini && " +
+                        "install-php-extensions redis");
+            }
+
+            stage.EmptyLine();
+        }
+
+        // Preload is deliberately excluded here and written at the very end instead. It names a file that
+        // Composer has not created yet, and PHP fails to start at all when opcache.preload points at a
+        // missing file — which would break the composer install a few lines below.
+        var startupSettings = options.IniSettings
+            .Where(setting => !IsPreloadSetting(setting.Key))
+            .ToList();
+
+        if (startupSettings.Count > 0)
+        {
+            WriteIniSettings(
+                stage,
+                startupSettings,
+                resourceName,
+                append: false,
+                "php.ini settings. The four z prefix sorts after the base image's own ini files.");
         }
 
         stage
             .User(PhpImages.ContainerUser)
+            .EmptyLine();
+    }
+
+    // opcache.preload names a file that only exists once the application and its dependencies are in place.
+    private static bool IsPreloadSetting(string key)
+        => key.StartsWith("opcache.preload", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Appends the preload settings, once the file they name actually exists.
+    /// </summary>
+    /// <remarks>
+    /// PHP refuses to start when <c>opcache.preload</c> points at a missing file, so writing this alongside
+    /// the other settings would break every PHP invocation later in the build — Composer included.
+    /// </remarks>
+    private static void WritePreloadSettings(DockerfileStage stage, PhpDockerfileOptions options, string resourceName)
+    {
+        var preloadSettings = options.IniSettings
+            .Where(setting => IsPreloadSetting(setting.Key))
+            .ToList();
+
+        if (preloadSettings.Count == 0)
+        {
+            return;
+        }
+
+        // Back to root briefly: the ini directory is not writable by the application user.
+        stage.User("root");
+
+        WriteIniSettings(
+            stage,
+            preloadSettings,
+            resourceName,
+            append: true,
+            "Preloading, added last because it names a file Composer has only just created");
+
+        stage
+            .User(PhpImages.ContainerUser)
+            .EmptyLine();
+    }
+
+    private static void WriteIniSettings(
+        DockerfileStage stage,
+        IReadOnlyCollection<KeyValuePair<string, string>> settings,
+        string resourceName,
+        bool append,
+        string comment)
+    {
+        foreach (var setting in settings)
+        {
+            ValidateIniValue(setting.Key, "php.ini setting name", resourceName);
+            ValidateIniValue(setting.Value, $"php.ini value for '{setting.Key}'", resourceName);
+        }
+
+        // printf with a %s per line rather than echo: echo's handling of backslashes and leading dashes
+        // differs between shells, and these values come from the caller.
+        var format = string.Join("", Enumerable.Repeat("%s\\n", settings.Count));
+        var arguments = string.Join(
+            " ",
+            settings.Select(setting => ShellQuote($"{setting.Key}={setting.Value}")));
+
+        var redirect = append ? ">>" : ">";
+
+        stage
+            .Comment(comment)
+            .Run($"printf '{format}' {arguments} {redirect} {PhpImages.PhpConfDirectory}/{PhpImages.GeneratedIniFileName}")
             .EmptyLine();
     }
 
