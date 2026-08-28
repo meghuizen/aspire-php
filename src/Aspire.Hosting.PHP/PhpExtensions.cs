@@ -115,7 +115,20 @@ public static class PhpExtensions
     /// <summary>Image processing. Needed by every CMS here for thumbnails.</summary>
     public const string Gd = "gd";
 
-    /// <summary>ImageMagick, more capable than <see cref="Gd"/> and considerably larger.</summary>
+    /// <summary>
+    /// ImageMagick: far more formats and better quality than <see cref="Gd"/>, at a large size cost.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Adds roughly 186 MB, which nearly doubles the CLI image. Not part of any default set for that reason.
+    /// Verified working on both base images, including the thread-safe build FrankenPHP uses, where ImageMagick
+    /// has historically been unreliable.
+    /// </para>
+    /// <para>
+    /// It parses a very large number of formats, which is a wide attack surface for user-uploaded files. Review
+    /// ImageMagick's policy.xml if you accept uploads from the public.
+    /// </para>
+    /// </remarks>
     public const string Imagick = "imagick";
 
     /// <summary>Reads image metadata. WordPress uses it when handling uploads.</summary>

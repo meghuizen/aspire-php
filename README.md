@@ -114,9 +114,37 @@ explicit rebuild described above to gain igbinary support.
 | `PhpExtensions.SimdJson` | `simdjson` | **+5 MB** | SIMD JSON parsing. Only pays off on large documents |
 | `PhpExtensions.DataStructures` | `ds` | ~0 MB | See the caveat below |
 | `PhpExtensions.PdoSqlServer` | `pdo_sqlsrv` | **+12 MB** | Microsoft's ODBC driver. Does build on Alpine |
-| `PhpExtensions.Imagick` | `imagick` | large | More capable than `gd` |
+| `PhpExtensions.Imagick` | `imagick` | **+186 MB** | Far more capable than `gd`. See below |
 
-Two worth knowing before you reach for them:
+### Imagick
+
+Supported and verified, but **not installed by default** — it adds 186 MB, nearly doubling the CLI image:
+
+| | Base | With Imagick |
+|---|---|---|
+| `8.5-cli-alpine` | 199 MB | **385 MB** |
+| `8.5-frankenphp-alpine` | 314 MB | **497 MB** |
+
+```csharp
+builder.AddWordPressApp("blog", "../blog")
+       .WithPhpExtension(PhpExtensions.Imagick);
+```
+
+Verified as Imagick 3.8.1 on both base images, with 268 formats including JPEG, PNG, WEBP, **AVIF**, **HEIC**,
+GIF, TIFF, SVG and PDF — well beyond what `gd` handles.
+
+The check that mattered: **FrankenPHP runs thread-safe (ZTS) PHP**, while the CLI image is NTS, and Imagick has
+a long history of trouble under ZTS. It works — a test actually rendered a PNG inside the ZTS image — but that
+is worth knowing if you swap in a different base image, because it is the combination most likely to break.
+
+`gd` stays the default for the CMS helpers. It covers ordinary thumbnailing at a fraction of the size; reach for
+Imagick when you need the formats or the quality. WordPress will prefer Imagick automatically once it is present.
+
+If you do add it, note that ImageMagick parses a very large number of formats, which is a wide attack surface
+for user-uploaded files — its `policy.xml` exists precisely to narrow that, and is worth reviewing if you accept
+uploads from the public.
+
+Two more worth knowing before you reach for them:
 
 - **`ds` version 2.0.0 removed `Ds\Vector`, `Ds\Deque`, `Ds\Stack`, `Ds\Queue` and `Ds\PriorityQueue`.** What
   remains is `Ds\Map`, `Ds\Set`, `Ds\Seq`, `Ds\Heap`, `Ds\Pair`. Nearly all existing code and documentation
