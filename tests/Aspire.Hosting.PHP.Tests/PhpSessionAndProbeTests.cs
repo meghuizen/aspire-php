@@ -54,6 +54,39 @@ public class PhpSessionAndProbeTests
     }
 
     [Fact]
+    public void SessionStore_UsesThePhpredisSavePathGrammarNotAUrl()
+    {
+        // phpredis parses save_path itself: the scheme is tcp or tls, and the password is an auth query
+        // parameter. Handing it the resource's own redis://user:pass@host URI produces a handler that fails
+        // to connect at runtime with nothing useful in the message.
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        var cache = builder.AddRedis("cache");
+        var php = builder.AddLaravelApp("shop", directory.Path).WithSessionStore(cache);
+
+        var savePath = ((ReferenceExpression)GetEnvironment(php.Resource)[PhpHostingExtensions.SessionSavePathVariable]).Format;
+
+        Assert.StartsWith("tcp://", savePath, StringComparison.Ordinal);
+        Assert.Contains("?auth=", savePath, StringComparison.Ordinal);
+        Assert.DoesNotContain("redis://", savePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SessionStore_SwitchesSchemeForTls()
+    {
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        var cache = builder.AddRedis("cache");
+        var php = builder.AddLaravelApp("shop", directory.Path).WithSessionStore(cache, useTls: true);
+
+        var savePath = ((ReferenceExpression)GetEnvironment(php.Resource)[PhpHostingExtensions.SessionSavePathVariable]).Format;
+
+        Assert.StartsWith("tls://", savePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SessionStore_RefusesAResourceWithNoRedisShape()
     {
         using var directory = new TempAppDirectory();

@@ -647,6 +647,10 @@ Verified end to end against real containers:
 
 - The PHP identity package's own test suite, run against PHP 8.5 in the same serversideup image this package
   publishes: the token cache's refresh arithmetic and every failure message
+- `aspire publish` against the playground: console commands now appear as services of their own with the
+  parent's full environment, `TRUSTED_PROXIES` reaches every web app, and `session.save_path` resolves to
+  `tcp://cache:6379?auth=${CACHE_PASSWORD}` — the phpredis grammar, with the password still a placeholder
+  rather than baked into the image
 
 Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and
 variable names, and that is unit-tested, but no full WordPress, Laravel, Symfony, Drupal or Joomla installation

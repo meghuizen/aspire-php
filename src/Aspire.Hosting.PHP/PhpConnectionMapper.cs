@@ -267,42 +267,43 @@ internal static class PhpConnectionMapper
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The handler parses this itself rather than taking a URL, and its grammar is not a URL's: the password
-    /// arrives as an <c>auth</c> query parameter, not as userinfo before the host.
+    /// Deliberately not built from the connection URI. The handler parses this string itself and its grammar
+    /// is not a URL's: the scheme is <c>tcp</c> or <c>tls</c> rather than <c>redis</c>, and the password is an
+    /// <c>auth</c> query parameter rather than userinfo before the host. Handing it a <c>redis://user:pass@host</c>
+    /// URL — which is what the resource's own URI is — produces a handler that fails to connect at runtime with
+    /// nothing useful in the message.
     /// </para>
     /// <para>
-    /// The connection's own URI carries the scheme, which is the only place TLS is visible, and Aspire turns
-    /// Redis TLS on by default. So the URI is used when there is one and the host and port are only a
-    /// fallback for a resource that does not publish it.
+    /// Whether the connection is encrypted cannot be read here, because the parts arrive as unresolved
+    /// expressions. The caller states it instead; <c>tcp</c> is the default because that is what a published
+    /// Redis is, and a run-mode Aspire Redis with TLS on needs it said explicitly.
     /// </para>
     /// </remarks>
     public static ReferenceExpression? BuildSessionSavePath(
-        IReadOnlyDictionary<string, ReferenceExpression> properties)
+        IReadOnlyDictionary<string, ReferenceExpression> properties,
+        bool useTls)
     {
-        var password = properties.GetValueOrDefault(PasswordProperty);
-
-        if (properties.GetValueOrDefault(UriProperty) is { } uri)
-        {
-            return password is null
-                ? uri
-                : ReferenceExpression.Create($"{uri}?auth={password}");
-        }
-
         var host = properties.GetValueOrDefault(HostProperty);
-        var port = properties.GetValueOrDefault(PortProperty);
 
         if (host is null)
         {
             return null;
         }
 
-        var authority = port is null
-            ? ReferenceExpression.Create($"tcp://{host}")
-            : ReferenceExpression.Create($"tcp://{host}:{port}");
+        var password = properties.GetValueOrDefault(PasswordProperty);
+        var port = properties.GetValueOrDefault(PortProperty);
+        var scheme = useTls ? "tls" : "tcp";
 
-        return password is null
-            ? authority
-            : ReferenceExpression.Create($"{authority}?auth={password}");
+        // Built as one expression rather than composed from smaller ones. Nesting a ReferenceExpression
+        // inside another collapses it to a single placeholder, which resolves correctly but leaves the
+        // scheme invisible to anything reading the format -- including a test trying to assert it is right.
+        return (port, password) switch
+        {
+            (null, null) => ReferenceExpression.Create($"{scheme}://{host}"),
+            (not null, null) => ReferenceExpression.Create($"{scheme}://{host}:{port}"),
+            (null, not null) => ReferenceExpression.Create($"{scheme}://{host}?auth={password}"),
+            _ => ReferenceExpression.Create($"{scheme}://{host}:{port}?auth={password}")
+        };
     }
 
     /// <summary>

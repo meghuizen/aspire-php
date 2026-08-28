@@ -440,3 +440,15 @@ of the contract can change together until the shape settles.
 **Testing status.** 183 C# tests and 10 PHP tests pass. The PHP tests run against PHP 8.5 in the serversideup
 image this package publishes. Everything in the "must be proven against real Azure" list above remains
 unproven, and the README says so rather than implying otherwise.
+
+**A3 had a bug that only a real publish would find.** The session save path was built from the cache
+resource's own connection URI, which is a `redis://user:pass@host` URL. That is not the grammar phpredis
+parses: its `save_path` takes `tcp://` or `tls://` and the password as an `auth` query parameter. The handler
+would have failed to connect at runtime with nothing useful in the message. Running `aspire publish` against
+the playground showed it in the generated compose file, which unit tests had not. It is now built from the
+parts, with the scheme stated by the caller because the parts are unresolved expressions at that point and
+nothing in them can be read.
+
+The expression is also built flat rather than composed, because nesting a `ReferenceExpression` inside another
+collapses it to a single placeholder — correct at resolution, but it hides the scheme from anything trying to
+assert it, which is why the first version of that test could not fail correctly.

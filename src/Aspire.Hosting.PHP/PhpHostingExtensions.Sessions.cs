@@ -12,6 +12,12 @@ public static partial class PhpHostingExtensions
     /// <typeparam name="T">The PHP web resource type.</typeparam>
     /// <param name="builder">The resource builder.</param>
     /// <param name="cache">The cache resource, for example one returned by <c>AddRedis</c>.</param>
+    /// <param name="useTls">
+    /// Whether the handler connects over TLS. Defaults to false, which is what a published Redis is. Aspire
+    /// turns TLS on for a Redis it runs locally, so set this when sharing sessions during <c>aspire run</c>.
+    /// It cannot be worked out here: the connection parts are unresolved expressions at this point, so
+    /// nothing in them can be read.
+    /// </param>
     /// <returns>A reference to the resource builder.</returns>
     /// <remarks>
     /// <para>
@@ -42,7 +48,8 @@ public static partial class PhpHostingExtensions
     /// </example>
     public static IResourceBuilder<T> WithSessionStore<T>(
         this IResourceBuilder<T> builder,
-        IResourceBuilder<IResourceWithConnectionString> cache)
+        IResourceBuilder<IResourceWithConnectionString> cache,
+        bool useTls = false)
         where T : IPhpWebResource
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -61,7 +68,7 @@ public static partial class PhpHostingExtensions
         {
             var properties = PhpConnectionMapper.ReadProperties(cache.Resource);
 
-            var savePath = PhpConnectionMapper.BuildSessionSavePath(properties)
+            var savePath = PhpConnectionMapper.BuildSessionSavePath(properties, useTls)
                 ?? throw new DistributedApplicationException(
                     $"The PHP app '{builder.Resource.Name}' stores sessions in '{cache.Resource.Name}', which does " +
                     "not expose a host or a URI. Reference a resource created by an Aspire Redis integration, or " +
