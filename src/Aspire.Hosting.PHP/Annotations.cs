@@ -143,6 +143,15 @@ internal sealed class PhpTrustedProxyAnnotation(string proxies) : IResourceAnnot
     public bool IsOptedOut => Proxies.Length == 0;
 }
 
+/// <summary>
+/// Records that the application's sessions are accounted for, either shared or deliberately not.
+/// </summary>
+/// <remarks>
+/// Only suppresses the scale-out warning. Both answers are legitimate, and the point is to know that one was
+/// given rather than to make the choice on the caller's behalf.
+/// </remarks>
+internal sealed class PhpSessionStoreAnnotation : IResourceAnnotation;
+
 /// <summary>Records that a collector is meant to run alongside a specific application, not on its own.</summary>
 /// <remarks>
 /// PHP has no background thread, so an exporter has no "later" in which to flush and every request pays the

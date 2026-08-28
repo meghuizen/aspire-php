@@ -180,6 +180,49 @@ internal static class PhpConnectionMapper
     }
 
     /// <summary>
+    /// Builds the <c>session.save_path</c> the phpredis session handler expects.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The handler parses this itself rather than taking a URL, and its grammar is not a URL's: the password
+    /// arrives as an <c>auth</c> query parameter, not as userinfo before the host.
+    /// </para>
+    /// <para>
+    /// The connection's own URI carries the scheme, which is the only place TLS is visible, and Aspire turns
+    /// Redis TLS on by default. So the URI is used when there is one and the host and port are only a
+    /// fallback for a resource that does not publish it.
+    /// </para>
+    /// </remarks>
+    public static ReferenceExpression? BuildSessionSavePath(
+        IReadOnlyDictionary<string, ReferenceExpression> properties)
+    {
+        var password = properties.GetValueOrDefault(PasswordProperty);
+
+        if (properties.GetValueOrDefault(UriProperty) is { } uri)
+        {
+            return password is null
+                ? uri
+                : ReferenceExpression.Create($"{uri}?auth={password}");
+        }
+
+        var host = properties.GetValueOrDefault(HostProperty);
+        var port = properties.GetValueOrDefault(PortProperty);
+
+        if (host is null)
+        {
+            return null;
+        }
+
+        var authority = port is null
+            ? ReferenceExpression.Create($"tcp://{host}")
+            : ReferenceExpression.Create($"tcp://{host}:{port}");
+
+        return password is null
+            ? authority
+            : ReferenceExpression.Create($"{authority}?auth={password}");
+    }
+
+    /// <summary>
     /// Works out which driver a resource represents.
     /// </summary>
     /// <remarks>

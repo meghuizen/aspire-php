@@ -26,7 +26,14 @@ public interface IPhpResource : IResourceWithServiceDiscovery, IResourceWithEnvi
 /// <summary>
 /// A PHP application served over HTTP by FrankenPHP.
 /// </summary>
-public interface IPhpWebResource : IPhpResource
+/// <remarks>
+/// Carries probes as well as endpoints. Probes are what a deployment target reads to decide whether a
+/// replica has started, may take traffic, and is still alive; a health check registered only with the
+/// dashboard tells it nothing. Worker resources are deliberately excluded, having no endpoint to probe.
+/// </remarks>
+#pragma warning disable ASPIREPROBES001
+public interface IPhpWebResource : IPhpResource, IResourceWithProbes
+#pragma warning restore ASPIREPROBES001
 {
     /// <summary>
     /// Gets the document root, relative to <see cref="IPhpResource.AppDirectory"/>. Usually <c>public</c>.
