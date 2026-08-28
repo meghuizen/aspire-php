@@ -71,8 +71,45 @@ a container, which has to be settled when the resource is created.
 | `WithPhpVersion(version)` | Pins the image tag and the version required of a local PHP |
 | `WithDockerfileBaseImage(runtimeImage:)` | Aspire built-in. Overrides the base image |
 
-The PHP version is read from `.php-version` or `composer.json` automatically; `WithPhpVersion` is only needed
-when the application declares neither.
+## Choosing a PHP version
+
+8.5 is the default. **8.4 is fully supported** — switch with any one of these, in order of precedence:
+
+```csharp
+// 1. Explicit, and wins over everything else
+builder.AddPhpWebApp("shop", "../shop").WithPhpVersion("8.4");
+```
+
+```
+# 2. A .php-version file in the application directory
+8.4
+```
+
+```jsonc
+// 3. composer.json — config.platform.php wins over require.php, because it is what
+//    Composer actually resolved your vendor directory against
+{ "require": { "php": "^8.4" } }
+```
+
+Constraint syntax is understood, so `^8.4`, `>=8.4`, `8.4.*`, `~8.4.0` and `8.4.24` all select 8.4. A range such
+as `>=8.4 <8.6` resolves to its lower bound, since that is the version the application is guaranteed to run on.
+
+The version selects the image tag for both the published container and the run-mode container:
+
+| Version | Worker image | Web image |
+|---|---|---|
+| 8.5 (default) | `serversideup/php:8.5-cli-alpine` | `serversideup/php:8.5-frankenphp-alpine` |
+| 8.4 | `serversideup/php:8.4-cli-alpine` | `serversideup/php:8.4-frankenphp-alpine` |
+
+Both are verified to exist and run — 8.5.9 and 8.4.24 respectively.
+
+`WithDockerfileBaseImage(runtimeImage: "...")` still overrides the whole thing if you want an image from
+somewhere else entirely.
+
+One thing to watch: when you run against a **local** PHP, you get whichever version is installed on your machine,
+not the one you targeted. If those differ the resource logs a warning at startup naming both, because otherwise
+you would develop on one version and deploy another with nothing to indicate it. Pass `PhpRunMode.Container` to
+develop on exactly the version you deploy.
 
 ## Telemetry
 

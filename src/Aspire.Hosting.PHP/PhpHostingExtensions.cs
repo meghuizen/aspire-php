@@ -368,9 +368,49 @@ public static partial class PhpHostingExtensions
                 // left for the developer to infer from the dashboard.
                 var logger = evt.Services.GetRequiredService<ResourceLoggerService>().GetLogger(resource);
                 logger.LogInformation("PHP app '{Name}' is running in {Mode} mode.", resource.Name, mode);
+
+                WarnOnVersionDrift(resource, usesContainer, logger);
+
                 return Task.CompletedTask;
             });
         }
+    }
+
+    /// <summary>
+    /// Warns when the local PHP is not the version the published image will use.
+    /// </summary>
+    /// <remarks>
+    /// The run mode is decided while the resource is being created, but <c>WithPhpVersion</c> is applied after
+    /// it returns. So an application that pins 8.4 on a machine with 8.5 installed would develop against 8.5
+    /// and deploy 8.4 with nothing to indicate it. Checked here, at the last point before start, so the final
+    /// pinned version is the one compared.
+    /// </remarks>
+    private static void WarnOnVersionDrift(IPhpResource resource, bool usesContainer, ILogger logger)
+    {
+        // Container mode builds from the pinned version, so the two cannot drift apart.
+        if (usesContainer
+            || !resource.TryGetLastAnnotation<PhpEnvironmentAnnotation>(out var environment)
+            || environment.Version is not { } pinnedVersion
+            || environment.PhpExecutablePath is not { } phpExecutablePath)
+        {
+            return;
+        }
+
+        var installedVersion = PhpVersionDetector.GetExecutableVersion(phpExecutablePath);
+        if (installedVersion is null || string.Equals(installedVersion, pinnedVersion, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // Each named placeholder maps to one argument, so the target version is not repeated in the template.
+        logger.LogWarning(
+            "PHP app '{Name}' targets PHP {PinnedVersion} and will publish a container on that version, but " +
+            "'{PhpExecutablePath}' is PHP {InstalledVersion}, so you are developing against a different one. " +
+            "Install the targeted version, or pass PhpRunMode.Container to develop on the version you deploy.",
+            resource.Name,
+            pinnedVersion,
+            phpExecutablePath,
+            installedVersion);
     }
 
     private static void ConfigurePublish(
