@@ -75,6 +75,74 @@ a container, which has to be settled when the resource is created.
 | `WithDataVolume(path, name?)` | Persists uploads across container restarts |
 | `WithDockerfileBaseImage(runtimeImage:)` | Aspire built-in. Overrides the base image |
 
+## Extensions
+
+`WithPhpExtension` takes any name the extension installer understands. `PhpExtensions` provides constants so
+you do not have to guess between spellings that only fail at image build time:
+
+```csharp
+builder.AddPhpWebApp("app", "../app")
+       .WithPhpExtension(PhpExtensions.DataStructures, PhpExtensions.SimdJson, PhpExtensions.PdoSqlServer);
+```
+
+### Already in the base image
+
+41 extensions ship in 8.5, 39 in 8.4 (the difference is `lexbor` and `uri`, both new in PHP 8.5 core). The CLI
+and FrankenPHP variants are identical.
+
+```
+Core  ctype  curl  date  dom  fileinfo  filter  hash  iconv  json  lexbor†  libxml
+mbstring  mysqlnd  openssl  pcntl  pcre  PDO  pdo_mysql  pdo_pgsql  pdo_sqlite
+Phar  posix  random  readline  redis  Reflection  session  SimpleXML  sodium  SPL
+sqlite3  standard  tokenizer  uri†  xml  xmlreader  xmlwriter  OPcache  zip  zlib
+                                                                     († 8.5 only)
+```
+
+Requesting one of these is harmless but does nothing — **the installer will not replace an extension that is
+already installed**. That is why `pdo_mysql` and `pdo_pgsql` are effectively free, and why Redis needs the
+explicit rebuild described above to gain igbinary support.
+
+### Commonly added
+
+| Constant | Name | Size cost | Notes |
+|---|---|---|---|
+| `PhpExtensions.Gd` | `gd` | small | Image processing. Every CMS here needs it |
+| `PhpExtensions.Intl` | `intl` | small | Collation and formatting |
+| `PhpExtensions.MySqli` | `mysqli` | small | WordPress and Joomla call this directly, not PDO |
+| `PhpExtensions.Igbinary` | `igbinary` | small | Halves what a cache round-trip serializes |
+| `PhpExtensions.Apcu` | `apcu` | small | Per-process in-memory cache |
+| `PhpExtensions.SimdJson` | `simdjson` | **+5 MB** | SIMD JSON parsing. Only pays off on large documents |
+| `PhpExtensions.DataStructures` | `ds` | ~0 MB | See the caveat below |
+| `PhpExtensions.PdoSqlServer` | `pdo_sqlsrv` | **+12 MB** | Microsoft's ODBC driver. Does build on Alpine |
+| `PhpExtensions.Imagick` | `imagick` | large | More capable than `gd` |
+
+Two worth knowing before you reach for them:
+
+- **`ds` version 2.0.0 removed `Ds\Vector`, `Ds\Deque`, `Ds\Stack`, `Ds\Queue` and `Ds\PriorityQueue`.** What
+  remains is `Ds\Map`, `Ds\Set`, `Ds\Seq`, `Ds\Heap`, `Ds\Pair`. Nearly all existing code and documentation
+  targets the older API. It is also niche — neither Laravel nor Symfony uses it, so gains are confined to your
+  own hot paths, and under a per-request model the structure is built and destroyed within one request.
+- **`pdo_sqlsrv` works on Alpine.** Microsoft's ODBC driver supports musl, so SQL Server does not force you onto
+  a Debian base image.
+
+## Alpine or Debian
+
+The default images are Alpine. Debian variants exist — drop the `-alpine` suffix — and are considerably larger:
+
+| Image | Alpine | Debian | Difference |
+|---|---|---|---|
+| `8.5-cli` | **199 MB** | 804 MB | 4.0× |
+| `8.5-frankenphp` | **314 MB** | 883 MB | 2.8× |
+| `8.4-cli` | 169 MB | | |
+| `8.4-frankenphp` | 278 MB | | |
+
+Alpine is the default for that reason, and everything this integration does — including `pdo_sqlsrv`, the usual
+reason people are forced onto glibc — is verified to build on it.
+
+Reach for Debian when you hit a genuine musl incompatibility: a proprietary extension shipped as a glibc binary,
+or a workload sensitive to musl's allocator, which is slower than glibc's under heavy multi-threaded malloc.
+Switch with `WithDockerfileBaseImage(runtimeImage: "docker.io/serversideup/php:8.5-frankenphp")`.
+
 ## Choosing a PHP version
 
 8.5 is the default. **8.4 is fully supported** — switch with any one of these, in order of precedence:
