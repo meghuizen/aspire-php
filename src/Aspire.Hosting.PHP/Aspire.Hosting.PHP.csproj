@@ -3,9 +3,11 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <IsPackable>true</IsPackable>
-    <PackageId>Aspire.Hosting.PHP</PackageId>
-    <Description>PHP support for Aspire. Model PHP workers and web applications as Aspire resources.</Description>
-    <PackageTags>aspire integration hosting php framework runtime frankenphp composer</PackageTags>
+    <PackageId>Meghuizen.Aspire.Hosting.Php</PackageId>
+    <Description>PHP hosting integration for Aspire. Run PHP workers and FrankenPHP web applications as Aspire resources, and publish them as hardened non-root containers.</Description>
+    <PackageTags>aspire integration hosting php frankenphp composer opentelemetry</PackageTags>
+    <PackageProjectUrl>https://github.com/meghuizen/aspire-php</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/meghuizen/aspire-php</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>

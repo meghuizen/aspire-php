@@ -10,8 +10,13 @@ Requires **Aspire 13.5.x**. Targets **PHP 8.5.x**.
 ## Install
 
 ```bash
-aspire add Aspire.Hosting.PHP
+dotnet add package Meghuizen.Aspire.Hosting.Php
 ```
+
+The package ID carries a vendor prefix because `Aspire.*` is an
+[ID prefix reserved](https://learn.microsoft.com/en-us/nuget/nuget-org/id-prefix-reservation) by Microsoft on
+nuget.org. The assembly and namespace are still `Aspire.Hosting.PHP`, and the extension methods live in the
+`Aspire.Hosting` namespace, so your AppHost code needs no `using`.
 
 ## Use
 
