@@ -1,0 +1,26 @@
+{
+    "name": "meghuizen/aspire-azure-identity",
+    "description": "Microsoft Entra access tokens for PHP applications running on Azure Container Apps or App Service. Use a token as a database password, or read a Key Vault secret, with a managed identity and no secrets in configuration.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["azure", "entra", "managed-identity", "passwordless", "container-apps", "key-vault"],
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Meghuizen\\AspireAzure\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Meghuizen\\AspireAzure\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
