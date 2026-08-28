@@ -407,3 +407,36 @@ second container be added there without fighting its own image-building is unver
   `user-assigned-managed-identity` for identity and role assignments, and
   `compiler-warning-aspireprobes001` for the probe API and its defaults
 - [PHP bug #78467](https://bugs.php.net/bug.php?id=78467) — PDO and the cleartext plugin
+
+---
+
+## Implementation notes
+
+Added after the work was done, recording where reality differed from the design above. The sections above are
+left as written so the difference is visible.
+
+**B6 is not implementable as designed.** The plan was for `WithDataVolume` to set the uid and gid of the Azure
+Files mount to match the image's user. There is no API to call: `ContainerAppAzureFileProperties` carries an
+account name, key, share name and access mode, and no mount options at all. Container Apps simply does not
+expose them, unlike AKS. The implementation therefore warns at publish time and points at
+`WithBlobStorageReference`, which was already the recommended answer for uploads.
+
+**A4 needed a different API than expected.** `WithHttpProbe` registers a dashboard health check internally,
+keyed on endpoint, path and status code, so calling it three times for the same path collides on the second.
+Readiness goes through `WithHttpProbe` — it is the probe that answers "can this take traffic", which is what a
+`WaitFor` dependent wants — and startup and liveness are added as `EndpointProbeAnnotation` directly.
+
+**A1's environment copy had to move.** The design said to replay the parent's environment callbacks. The
+original code did this at `BeforeStart`, which publishing never raises, so a published migration would have
+carried no database configuration. Replaying at resolution time works in both modes and keeps the original
+property that references added after `WithMigrations` are still picked up. The same reasoning moved A3's
+scale-out warning off a start event.
+
+**One confirmation.** Alpine's `www-data` is UID 82, as assumed, verified by running the base image.
+
+**Part C is staged in this repository** under `php/aspire-azure-identity` rather than extracted, so both sides
+of the contract can change together until the shape settles.
+
+**Testing status.** 183 C# tests and 10 PHP tests pass. The PHP tests run against PHP 8.5 in the serversideup
+image this package publishes. Everything in the "must be proven against real Azure" list above remains
+unproven, and the README says so rather than implying otherwise.
