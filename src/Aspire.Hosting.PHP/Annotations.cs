@@ -112,6 +112,49 @@ internal sealed class PhpWebServerAnnotation(PhpWebServer webServer) : IResource
 internal sealed class PhpApplicationInsightsAnnotation : IResourceAnnotation;
 
 /// <summary>
+/// Records how a console command is meant to run, so a deployment target can shape it correctly.
+/// </summary>
+/// <remarks>
+/// The kind is not derivable from the resource itself — a one-shot migration and a long-running queue worker
+/// are the same shape in the app model and differ only in intent. Deployment targets need that intent: on
+/// Azure Container Apps a one-shot command is a Job and a queue worker is an app that must not scale to zero.
+/// </remarks>
+internal sealed class PhpConsoleKindAnnotation(PhpConsoleCommandKind kind, string? cronExpression = null)
+    : IResourceAnnotation
+{
+    public PhpConsoleCommandKind Kind { get; } = kind;
+
+    /// <summary>The cron expression, set only when <see cref="Kind"/> is <see cref="PhpConsoleCommandKind.Scheduled"/>.</summary>
+    public string? CronExpression { get; } = cronExpression;
+}
+
+/// <summary>
+/// Marks a PHP web resource as sitting behind a TLS-terminating reverse proxy.
+/// </summary>
+/// <remarks>
+/// Carries the trusted proxy list so the Dockerfile generator knows whether to write the <c>$_SERVER</c>
+/// shim, which is needed only by the applications that read those keys directly rather than an environment
+/// variable. An empty list means the caller opted out.
+/// </remarks>
+internal sealed class PhpTrustedProxyAnnotation(string proxies) : IResourceAnnotation
+{
+    public string Proxies { get; } = proxies;
+
+    public bool IsOptedOut => Proxies.Length == 0;
+}
+
+/// <summary>Records that a collector is meant to run alongside a specific application, not on its own.</summary>
+/// <remarks>
+/// PHP has no background thread, so an exporter has no "later" in which to flush and every request pays the
+/// export cost inline. That is only avoided when the collector is reachable over localhost, which on a
+/// deployment target means being a second container in the same unit rather than a separate one.
+/// </remarks>
+internal sealed class PhpCollectorColocationAnnotation(string applicationResourceName) : IResourceAnnotation
+{
+    public string ApplicationResourceName { get; } = applicationResourceName;
+}
+
+/// <summary>
 /// Operating system packages the image needs, beyond PHP extensions.
 /// </summary>
 /// <remarks>

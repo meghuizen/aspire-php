@@ -36,6 +36,16 @@ public enum PhpConsoleCommandKind
     /// <summary>
     /// Runs until stopped. The application does not wait for it.
     /// </summary>
-    /// <remarks>Queue workers and schedulers.</remarks>
-    LongRunning = 1
+    /// <remarks>Queue workers.</remarks>
+    LongRunning = 1,
+
+    /// <summary>
+    /// Runs repeatedly on a schedule.
+    /// </summary>
+    /// <remarks>
+    /// Behaves like <see cref="LongRunning"/> during <c>aspire run</c>, because the framework's own scheduler
+    /// ticks internally. A deployment target that has a scheduler of its own — Azure Container App Jobs, a
+    /// Kubernetes CronJob — uses the cron expression instead of leaving a process running to count minutes.
+    /// </remarks>
+    Scheduled = 2
 }

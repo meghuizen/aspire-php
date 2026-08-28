@@ -133,16 +133,87 @@ public class PhpConsoleCommandTests
     }
 
     [Fact]
-    public void ConsoleCommands_AreNotCreatedWhenPublishing()
+    public void ConsoleCommands_ArePublished()
     {
-        // They would run on the machine doing the publish, which is the wrong machine.
+        // The command is never executed at publish time -- that would run on the machine doing the publish.
+        // It does have to reach the manifest, because that is the only way the deployment learns that
+        // migrations and a queue worker exist at all.
         using var directory = new TempAppDirectory();
         var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
 
         builder.AddLaravelApp("shop", directory.Path).WithMigrations().WithQueueWorker();
 
-        Assert.DoesNotContain(builder.Resources, r => r.Name.Contains("migrate", StringComparison.Ordinal));
-        Assert.DoesNotContain(builder.Resources, r => r.Name.Contains("queue", StringComparison.Ordinal));
+        // Args are asserted in run mode instead: publishing hands them to Aspire's own container substitution,
+        // which resolves them during the publish rather than while the model is being built.
+        Assert.Equal("shop-migrate", GetResource(builder, "shop-migrate").Name);
+        Assert.Equal("shop-queue", GetResource(builder, "shop-queue").Name);
+    }
+
+    [Fact]
+    public void PublishedConsoleCommands_CarryTheirKind()
+    {
+        // A one-shot migration and a long-running worker are the same shape in the app model. A deployment
+        // target cannot tell them apart without being told, and it must: one is a job, the other must not
+        // scale to zero.
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        builder.AddLaravelApp("shop", directory.Path)
+            .WithMigrations()
+            .WithQueueWorker()
+            .WithScheduler();
+
+        Assert.Equal(PhpConsoleCommandKind.OneShot, GetKind(builder, "shop-migrate").Kind);
+        Assert.Equal(PhpConsoleCommandKind.LongRunning, GetKind(builder, "shop-queue").Kind);
+
+        var scheduler = GetKind(builder, "shop-scheduler");
+        Assert.Equal(PhpConsoleCommandKind.Scheduled, scheduler.Kind);
+        Assert.Equal("* * * * *", scheduler.CronExpression);
+    }
+
+    [Fact]
+    public void Scheduler_TakesAnExplicitCron()
+    {
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        builder.AddLaravelApp("shop", directory.Path).WithScheduler("*/5 * * * *");
+
+        Assert.Equal("*/5 * * * *", GetKind(builder, "shop-scheduler").CronExpression);
+    }
+
+    [Fact]
+    public void PublishedConsoleCommands_InheritTheApplicationsEnvironment()
+    {
+        // Publishing never raises BeforeStart, so a command whose environment is copied at start would reach
+        // the deployment with no database configured at all.
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        var db = builder.AddMySql("mysql").AddDatabase("shopdb");
+
+        builder.AddLaravelApp("shop", directory.Path)
+            .WithDatabaseReference(db)
+            .WithMigrations();
+
+        var environment = GetEnvironment(GetResource(builder, "shop-migrate"));
+
+        Assert.Contains("DB_HOST", environment.Keys);
+        Assert.Contains("DB_DATABASE", environment.Keys);
+    }
+
+    [Fact]
+    public void PublishedConsoleCommands_BuildTheSameImageAsTheApplication()
+    {
+        using var directory = new TempAppDirectory();
+        var builder = PhpTestBuilder.CreatePublishBuilder(directory.Path);
+
+        builder.AddLaravelApp("shop", directory.Path).WithMigrations();
+
+        // Same Dockerfile, same context: identical layers, so the second build is a cache hit rather than a
+        // second compile of every extension.
+        var migrate = GetResource(builder, "shop-migrate");
+        Assert.Contains(migrate.Annotations, a => a is DockerfileBuildAnnotation);
     }
 
     [Fact]
@@ -184,6 +255,22 @@ public class PhpConsoleCommandTests
 
     private static IResource GetResource(IDistributedApplicationBuilder builder, string name)
         => Assert.Single(builder.Resources, r => r.Name == name);
+
+    private static PhpConsoleKindAnnotation GetKind(IDistributedApplicationBuilder builder, string name)
+        => Assert.Single(GetResource(builder, name).Annotations.OfType<PhpConsoleKindAnnotation>());
+
+    private static Dictionary<string, object> GetEnvironment(IResource resource)
+    {
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Publish));
+
+        foreach (var annotation in resource.Annotations.OfType<EnvironmentCallbackAnnotation>())
+        {
+            annotation.Callback(context).GetAwaiter().GetResult();
+        }
+
+        return context.EnvironmentVariables;
+    }
 
     private static string[] GetArgs(IResource resource)
     {
