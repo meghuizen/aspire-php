@@ -222,8 +222,8 @@ public static partial class PhpHostingExtensions
         {
             if (builder.ExecutionContext.IsPublishMode)
             {
-                // Publishing turns this into a FrankenPHP container, and a container endpoint must name the
-                // port inside the container. Aspire maps a host port onto it.
+                // Publishing turns this into a container, and a container endpoint must name the port inside
+                // the container. Aspire maps a host port onto it.
                 resourceBuilder.WithHttpEndpoint(targetPort: PhpImages.DefaultWebContainerPort, env: "PORT");
             }
             else
@@ -234,6 +234,15 @@ public static partial class PhpHostingExtensions
             }
 
             var endpoint = resource.GetEndpoint("http");
+
+            if (builder.ExecutionContext.IsPublishMode)
+            {
+                // The published container is served by a real web server, which has to be told the document
+                // root. Without this it falls back to its own default, which only happens to be right when the
+                // document root was left at the default too.
+                resourceBuilder.WithEnvironment(context =>
+                    ConfigureWebServerEnvironment(resource, context.EnvironmentVariables, endpoint, documentRoot!));
+            }
 
             resourceBuilder.WithArgs(context =>
             {
@@ -302,14 +311,9 @@ public static partial class PhpHostingExtensions
             resourceBuilder.WithHttpEndpoint(targetPort: PhpImages.DefaultWebContainerPort, env: "PORT");
             var endpoint = resource.GetEndpoint("http");
 
-            // No entrypoint or args: the image's own entrypoint starts FrankenPHP. It reads both of these.
-            resourceBuilder
-                .WithEnvironment(context =>
-                {
-                    context.EnvironmentVariables["CADDY_HTTP_PORT"] = endpoint.Property(EndpointProperty.TargetPort);
-                    context.EnvironmentVariables["CADDY_SERVER_ROOT"] =
-                        $"{PhpImages.AppBaseDirectory}/{ToContainerPath(documentRoot!)}";
-                });
+            // No entrypoint or args: the image's own entrypoint starts the web server. It reads both of these.
+            resourceBuilder.WithEnvironment(context =>
+                ConfigureWebServerEnvironment(resource, context.EnvironmentVariables, endpoint, documentRoot!));
         }
         else
         {
@@ -321,6 +325,35 @@ public static partial class PhpHostingExtensions
         ConfigureCommon(builder, resourceBuilder, appDirectory, isWeb, usesContainer: true);
 
         return resourceBuilder;
+    }
+
+    /// <summary>
+    /// Tells the image's web server which port to listen on and where the document root is.
+    /// </summary>
+    /// <remarks>
+    /// The two servers read different variables, and neither reads the other's, so getting this wrong shows up
+    /// as a container that starts and then serves nothing.
+    /// </remarks>
+    private static void ConfigureWebServerEnvironment(
+        IPhpResource resource,
+        IDictionary<string, object> environment,
+        EndpointReference endpoint,
+        string documentRoot)
+    {
+        var containerDocumentRoot = $"{PhpImages.AppBaseDirectory}/{ToContainerPath(documentRoot)}";
+        var isApache = resource.TryGetLastAnnotation<PhpWebServerAnnotation>(out var webServer)
+            && webServer.WebServer == PhpWebServer.Apache;
+
+        if (isApache)
+        {
+            environment["APACHE_HTTP_PORT"] = endpoint.Property(EndpointProperty.TargetPort);
+            environment["APACHE_DOCUMENT_ROOT"] = containerDocumentRoot;
+        }
+        else
+        {
+            environment["CADDY_HTTP_PORT"] = endpoint.Property(EndpointProperty.TargetPort);
+            environment["CADDY_SERVER_ROOT"] = containerDocumentRoot;
+        }
     }
 
     private static void ConfigureCommon<T>(

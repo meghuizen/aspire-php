@@ -1,0 +1,4 @@
+# Proof that Apache honours .htaccess: this rewrite and header come from this file alone.
+RewriteEngine On
+RewriteRule ^rewritten-by-htaccess$ index.php [L]
+Header set X-Htaccess "honoured"

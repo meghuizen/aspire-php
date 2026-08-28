@@ -93,3 +93,9 @@ internal sealed class PhpOptimizationAnnotation(PhpOptimizationOptions options) 
 {
     public PhpOptimizationOptions Options { get; } = options;
 }
+
+/// <summary>Records which web server serves a PHP web application.</summary>
+internal sealed class PhpWebServerAnnotation(PhpWebServer webServer) : IResourceAnnotation
+{
+    public PhpWebServer WebServer { get; } = webServer;
+}

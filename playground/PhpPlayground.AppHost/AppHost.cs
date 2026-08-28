@@ -49,4 +49,10 @@ builder.AddPhpWebApp("data-pg", "../php-db")
        .WaitFor(pgDb)
        .WithExternalHttpEndpoints();
 
+// Apache rather than FrankenPHP, because this app needs .htaccess. Debian-based and larger, which is
+// the trade for the only web server here that reads those files.
+builder.AddPhpApacheApp("legacy", "../php-legacy")
+       .WithHealthCheck()
+       .WithExternalHttpEndpoints();
+
 builder.Build().Run();

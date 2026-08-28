@@ -87,13 +87,23 @@ internal sealed record PhpDockerfileOptions
             return explicitImage;
         }
 
-        var defaultTemplate = isWeb ? PhpImages.WebImageTemplate : PhpImages.CliImageTemplate;
+        var isApache = isWeb
+            && resource.TryGetLastAnnotation<PhpWebServerAnnotation>(out var webServer)
+            && webServer.WebServer == PhpWebServer.Apache;
+
+        var (defaultImage, defaultTemplate) = (isWeb, isApache) switch
+        {
+            (true, true) => (PhpImages.DefaultApacheImage, PhpImages.ApacheImageTemplate),
+            (true, false) => (PhpImages.DefaultWebImage, PhpImages.WebImageTemplate),
+            _ => (PhpImages.DefaultCliImage, PhpImages.CliImageTemplate)
+        };
+
         var version = resource.TryGetLastAnnotation<PhpEnvironmentAnnotation>(out var environment)
             ? environment.Version
             : null;
 
         return version is null
-            ? isWeb ? PhpImages.DefaultWebImage : PhpImages.DefaultCliImage
+            ? defaultImage
             : string.Format(System.Globalization.CultureInfo.InvariantCulture, defaultTemplate, version);
     }
 

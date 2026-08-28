@@ -62,6 +62,7 @@ a container, which has to be settled when the resource is created.
 |---|---|
 | `AddPhpApp(name, appDirectory, scriptPath, runMode?)` | Runs `php <scriptPath>`. Publishes on `serversideup/php:8.5-cli-alpine` |
 | `AddPhpWebApp(name, appDirectory, documentRoot?, runMode?)` | FrankenPHP, one HTTP endpoint. `documentRoot` defaults to `public` |
+| `AddPhpApacheApp(name, appDirectory, documentRoot?)` | Apache + PHP-FPM. The only option that reads `.htaccess` |
 | `WithComposer(install?, installArgs?)` | Child resource running `composer install`; the app waits for it |
 | `WithPhpExtension(params names)` | `install-php-extensions <names>` in the image. Accumulates across calls |
 | `WithOpenTelemetry()` | The `opentelemetry` extension plus `OTEL_PHP_AUTOLOAD_ENABLED` |
@@ -229,6 +230,42 @@ develop on exactly the version you deploy.
 Each is `AddPhpWebApp` with that application's document root, PHP extensions and naming already set, so
 everything on a plain PHP resource still applies. WordPress and Joomla serve from their own root rather than a
 `public/` subdirectory, which is why their document root is `.`.
+
+## Apache, when you need .htaccess
+
+```csharp
+builder.AddPhpApacheApp("legacy", "../legacy-app")
+       .WithHealthCheck()
+       .WithExternalHttpEndpoints();
+```
+
+**Apache is the only web server here that reads `.htaccess`.** nginx has no equivalent feature at all — its
+rules have to be translated into server configuration by hand — so this is specifically the Apache escape
+hatch, not a general "anything but FrankenPHP" one.
+
+Reach for it when the application genuinely needs those files: a legacy application, or a WordPress plugin that
+writes its own rewrite rules. Otherwise stay on `AddPhpWebApp`.
+
+| | FrankenPHP (default) | Apache |
+|---|---|---|
+| `.htaccess` | ✗ | **✓** |
+| Base | Alpine, 314 MB | Debian, 763 MB |
+| Compressed | 46 MB | **178 MB** |
+| PHP build | ZTS (thread-safe) | **NTS** |
+| Worker mode | ✓ | ✗ |
+
+Two consequences worth knowing:
+
+- **No Alpine variant of the Apache image exists** — `8.5-fpm-apache-alpine` is a 404 — so this is Debian and
+  roughly four times the compressed size. That is the price of the feature.
+- **It runs non-thread-safe PHP**, which is an advantage if you have an extension that dislikes ZTS. FrankenPHP
+  is thread-safe by necessity, and a handful of extensions still misbehave there.
+
+It always runs as a container, in every mode. PHP's built-in development server ignores `.htaccess` entirely, so
+falling back to it locally would quietly change how the application behaves.
+
+Verified end to end: a rewrite rule and a `Header` directive defined only in `.htaccess` both took effect, with
+`SERVER_SOFTWARE` reporting Apache and the SAPI reporting `fpm-fcgi`.
 
 ## Console commands, workers and schedulers
 
@@ -482,6 +519,7 @@ Verified end to end against real containers:
 - Console commands: a seed step connected to MySQL through the inherited variables, exited 0, and the app
   started only after it
 - Health checks: Aspire registered and passed an HTTP check on the one resource that asked for it
+- Apache: a rewrite rule and a header defined only in `.htaccess` both took effect, on NTS PHP
 - Cross-platform CI on Linux, Windows and macOS
 
 Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and

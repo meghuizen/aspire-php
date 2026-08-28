@@ -38,6 +38,12 @@ internal static class PhpImages
     /// <summary>The unprivileged user the serversideup images run as.</summary>
     public const string ContainerUser = "www-data";
 
+    /// <summary>Default image for Apache web applications. Debian: no Alpine variant of this image exists.</summary>
+    public const string DefaultApacheImage = "docker.io/serversideup/php:8.5-fpm-apache";
+
+    /// <summary>The Apache image tag family, used when a specific PHP version is pinned.</summary>
+    public const string ApacheImageTemplate = "docker.io/serversideup/php:{0}-fpm-apache";
+
     /// <summary>The port FrankenPHP listens on inside the container by default.</summary>
     public const int DefaultWebContainerPort = 8080;
 }
