@@ -126,7 +126,10 @@ internal static class PhpDockerfileGenerator
 
     private static void WriteEnvironmentSetup(DockerfileStage stage, PhpDockerfileOptions options, string resourceName)
     {
-        var needsRoot = options.Extensions.Count > 0 || options.IniSettings.Count > 0;
+        var needsRoot = options.Extensions.Count > 0
+            || options.IniSettings.Count > 0
+            || options.SystemPackages.Count > 0;
+
         if (!needsRoot)
         {
             return;
@@ -134,6 +137,26 @@ internal static class PhpDockerfileGenerator
 
         // install-php-extensions and writing into conf.d both need root; the images otherwise run unprivileged.
         stage.User("root");
+
+        if (options.SystemPackages.Count > 0)
+        {
+            foreach (var package in options.SystemPackages)
+            {
+                ValidateShellToken(package, "system package name", resourceName);
+            }
+
+            var packages = string.Join(" ", options.SystemPackages);
+
+            // The base image is overridable and the Apache variant is Debian, so neither package manager can
+            // be assumed. Whichever exists is used.
+            stage
+                .Comment("System packages")
+                .Run(
+                    $"if command -v apk > /dev/null; then apk add --no-cache {packages}; " +
+                    $"else apt-get update && apt-get install -y --no-install-recommends {packages} " +
+                    "&& rm -rf /var/lib/apt/lists/*; fi")
+                .EmptyLine();
+        }
 
         if (options.Extensions.Count > 0)
         {
@@ -256,7 +279,11 @@ internal static class PhpDockerfileGenerator
         var format = string.Join("", Enumerable.Repeat("%s\\n", settings.Count));
         var arguments = string.Join(
             " ",
-            settings.Select(setting => ShellQuote($"{setting.Key}={setting.Value}")));
+            // The value is quoted in the ini file itself, not just shell-quoted. PHP's ini parser stops an
+            // unquoted value at the next '=', which silently truncates anything containing one — a
+            // sendmail_path of "msmtp --host=${MAIL_HOST} ..." arrives as "msmtp --host" and mail() fails
+            // with no indication why. Quoting also keeps ${VAR} substitution working.
+            settings.Select(setting => ShellQuote($"{setting.Key}=\"{EscapeIniValue(setting.Value)}\"")));
 
         var redirect = append ? ">>" : ">";
 
@@ -305,6 +332,15 @@ internal static class PhpDockerfileGenerator
             }
         }
     }
+
+    /// <summary>
+    /// Escapes a value for a double-quoted php.ini entry.
+    /// </summary>
+    /// <remarks>
+    /// A double quote would end the value early. Backslashes are left alone: php.ini does not treat them as
+    /// escapes, and rewriting them would corrupt Windows-style paths and regular expressions.
+    /// </remarks>
+    private static string EscapeIniValue(string value) => value.Replace("\"", "\\\"");
 
     private static void ValidateIniValue(string value, string description, string resourceName)
     {

@@ -25,8 +25,8 @@ public class PhpDockerfileGeneratorTests
         var dockerfile = RenderWorker(php => php);
 
         Assert.Contains("RUN install-php-extensions igbinary apcu", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("apc.serializer=igbinary", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("session.serialize_handler=igbinary", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("apc.serializer=\"igbinary\"", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("session.serialize_handler=\"igbinary\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class PhpDockerfileGeneratorTests
 
         // Sorted, so the generated Dockerfile is byte-identical between runs and Docker layer caching holds.
         Assert.Contains(
-            @"RUN printf '%s\n%s\n%s\n%s\n' apc.serializer=igbinary max_execution_time=30 memory_limit=512M session.serialize_handler=igbinary > /usr/local/etc/php/conf.d/zzzz-aspire.ini",
+            @"RUN printf '%s\n%s\n%s\n%s\n' 'apc.serializer=""igbinary""' 'max_execution_time=""30""' 'memory_limit=""512M""' 'session.serialize_handler=""igbinary""' > /usr/local/etc/php/conf.d/zzzz-aspire.ini",
             dockerfile,
             StringComparison.Ordinal);
     }
@@ -77,8 +77,8 @@ public class PhpDockerfileGeneratorTests
             .WithPhpIniSetting("memory_limit", "256M")
             .WithPhpIniSetting("memory_limit", "512M"));
 
-        Assert.Contains("memory_limit=512M", dockerfile, StringComparison.Ordinal);
-        Assert.DoesNotContain("memory_limit=256M", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("memory_limit=\"512M\"", dockerfile, StringComparison.Ordinal);
+        Assert.DoesNotContain("memory_limit=\"256M\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class PhpDockerfileGeneratorTests
     {
         var dockerfile = RenderWorker(php => php.WithPhpIniSetting("error_reporting", "E_ALL & ~E_DEPRECATED"));
 
-        Assert.Contains("'error_reporting=E_ALL & ~E_DEPRECATED'", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("'error_reporting=\"E_ALL & ~E_DEPRECATED\"'", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]

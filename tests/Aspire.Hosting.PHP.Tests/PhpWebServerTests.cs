@@ -83,7 +83,7 @@ public class PhpWebServerTests
         var dockerfile = PhpTestBuilder.RenderPublishDockerfile(php.Resource);
 
         Assert.Contains("install-php-extensions igbinary apcu gd", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("memory_limit=256M", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("memory_limit=\"256M\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -110,3 +110,25 @@ internal sealed class PhpWebServerAnnotation(PhpWebServer webServer) : IResource
 
 /// <summary>Marks a collector as forwarding to Application Insights.</summary>
 internal sealed class PhpApplicationInsightsAnnotation : IResourceAnnotation;
+
+/// <summary>
+/// Operating system packages the image needs, beyond PHP extensions.
+/// </summary>
+/// <remarks>
+/// Kept separate from <see cref="PhpExtensionAnnotation"/> because these are installed by the distribution's
+/// package manager, not by the PHP extension installer.
+/// </remarks>
+internal sealed class PhpSystemPackageAnnotation : IResourceAnnotation
+{
+    private readonly List<string> _packages = [];
+
+    public IReadOnlyList<string> Packages => _packages;
+
+    public void Add(string package)
+    {
+        if (!_packages.Contains(package, StringComparer.Ordinal))
+        {
+            _packages.Add(package);
+        }
+    }
+}

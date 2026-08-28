@@ -79,6 +79,8 @@ a container, which has to be settled when the resource is created.
 | `WithPhpOptimizations(configure?)` | OPcache, igbinary, APCu, realpath cache and Composer autoloader tuning |
 | `WithDatabaseReference(db, ...)` | Translates a database reference into the names the app reads |
 | `WithCacheReference(cache, ...)` | Translates a cache reference; always sets `REDIS_URL` |
+| `WithMailReference(smtp, from?, ...)` | Points mail at any resource with an SMTP endpoint |
+| `WithSmtp(host, port, ...)` | Full SMTP configuration for an external server |
 | `WithDataVolume(path, name?)` | Persists uploads across container restarts |
 | `WithDockerfileBaseImage(runtimeImage:)` | Aspire built-in. Overrides the base image |
 
@@ -270,6 +272,48 @@ Asking for `PhpRunMode.Executable` with them is rejected rather than silently do
 
 Verified running side by side through Aspire: FrankenPHP, `nginx/1.30.4` and Apache each serving the same
 application, with a rewrite rule and a `Header` directive defined only in `.htaccess` taking effect on Apache.
+
+## Mail
+
+```csharp
+// MailPit for development, from CommunityToolkit.Aspire.Hosting.MailPit
+var mail = builder.AddMailPit("mail");
+
+builder.AddLaravelApp("shop", "../shop")
+       .WithMailReference(mail, from: "shop@example.test");
+
+// Or a real server
+builder.AddPhpWebApp("app", "../app")
+       .WithSmtp("smtp.example.com", 587, username: "postmaster", password: smtpPassword, encryption: "tls");
+```
+
+The SMTP server itself is not this package's concern — `WithMailReference` takes **any** resource with an SMTP
+endpoint. MailPit is the obvious development choice and already has an Aspire integration.
+
+**PHP applications send mail in two different ways, so both are configured.**
+
+Frameworks with their own mailer — Laravel, Symfony — speak SMTP themselves and read environment variables, so
+those are set in the convention each expects:
+
+| Convention | Variables |
+|---|---|
+| Laravel | `MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION`, `MAIL_FROM_ADDRESS` |
+| Symfony | `MAILER_DSN` |
+| WordPress, Joomla, Drupal, generic | `MAIL_*`, plus the sendmail shim below |
+
+Everything else calls PHP's `mail()`, and **`mail()` does not speak SMTP on Linux at all** — it pipes the
+message to whatever `sendmail_path` names, which by default is nothing useful in a container. WordPress and
+Joomla both work this way. So `msmtp` is installed and `sendmail_path` points at it, which makes `mail()`
+deliver over SMTP without the application changing a line.
+
+Verified end to end: a plain `mail()` call reached MailPit with the right From, To and Subject.
+
+Two details worth knowing:
+
+- **The password is read through a command, not passed as an argument.** `--passwordeval` keeps it out of the
+  process list, where `--password` would be visible to anything that can run `ps`.
+- **Host and port stay runtime configuration.** The generated ini uses `${MAIL_HOST}`, which PHP expands when it
+  parses the file, so the image does not have to be rebuilt when the server changes.
 
 ## Console commands, workers and schedulers
 
@@ -582,6 +626,7 @@ Verified end to end against real containers:
 - Health checks: Aspire registered and passed an HTTP check on the one resource that asked for it
 - Apache: a rewrite rule and a header defined only in `.htaccess` both took effect, on NTS PHP
 - All three web servers side by side through Aspire: FrankenPHP, `nginx/1.30.4` and Apache
+- Mail: a plain `mail()` call reached MailPit through the sendmail shim, with the right From, To and Subject
 - Cross-platform CI on Linux, Windows and macOS
 
 Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and

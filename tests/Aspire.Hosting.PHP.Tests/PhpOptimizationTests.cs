@@ -11,10 +11,10 @@ public class PhpOptimizationTests
     {
         var dockerfile = RenderPublish(php => php.WithPhpOptimizations());
 
-        Assert.Contains("opcache.enable=1", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.enable=\"1\"", dockerfile, StringComparison.Ordinal);
 
         // The source inside an image cannot change, so the stat on every include is pure waste.
-        Assert.Contains("opcache.validate_timestamps=0", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.validate_timestamps=\"0\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class PhpOptimizationTests
 
         var dockerfile = PhpTestBuilder.RenderDevDockerfile(php.Resource);
 
-        Assert.Contains("opcache.enable=0", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.enable=\"0\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -41,9 +41,9 @@ public class PhpOptimizationTests
             o.OpcacheInternedStringsMegabytes = 32;
         }));
 
-        Assert.Contains("opcache.memory_consumption=256", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("opcache.max_accelerated_files=30000", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("opcache.interned_strings_buffer=32", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.memory_consumption=\"256\"", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.max_accelerated_files=\"30000\"", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.interned_strings_buffer=\"32\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -59,8 +59,8 @@ public class PhpOptimizationTests
 
         var dockerfile = PhpTestBuilder.RenderDevDockerfile(php.Resource);
 
-        Assert.Contains("opcache.enable=1", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("opcache.jit=tracing", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.enable=\"1\"", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("opcache.jit=\"tracing\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -70,8 +70,8 @@ public class PhpOptimizationTests
         Assert.DoesNotContain("opcache.jit", RenderPublish(php => php.WithPhpOptimizations()), StringComparison.Ordinal);
 
         var withJit = RenderPublish(php => php.WithPhpOptimizations(o => o.OpcacheJit = true));
-        Assert.Contains("opcache.jit=tracing", withJit, StringComparison.Ordinal);
-        Assert.Contains("opcache.jit_buffer_size=64M", withJit, StringComparison.Ordinal);
+        Assert.Contains("opcache.jit=\"tracing\"", withJit, StringComparison.Ordinal);
+        Assert.Contains("opcache.jit_buffer_size=\"64M\"", withJit, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -81,8 +81,8 @@ public class PhpOptimizationTests
 
         Assert.Contains("igbinary", dockerfile, StringComparison.Ordinal);
         Assert.Contains("apcu", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("apc.serializer=igbinary", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("session.serialize_handler=igbinary", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("apc.serializer=\"igbinary\"", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("session.serialize_handler=\"igbinary\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -128,8 +128,8 @@ public class PhpOptimizationTests
         // The PHP default of 256K is far too small for a framework resolving thousands of include paths.
         var dockerfile = RenderPublish(php => php.WithPhpOptimizations());
 
-        Assert.Contains("realpath_cache_size=4096K", dockerfile, StringComparison.Ordinal);
-        Assert.Contains("realpath_cache_ttl=600", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("realpath_cache_size=\"4096K\"", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("realpath_cache_ttl=\"600\"", dockerfile, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public class PhpOptimizationTests
     public void Preload_IsAppliedOnlyWhenPublishing()
     {
         var published = RenderPublish(php => php.WithPhpOptimizations(o => o.OpcachePreloadScript = "vendor/autoload.php"));
-        Assert.Contains("opcache.preload=/var/www/html/vendor/autoload.php", published, StringComparison.Ordinal);
-        Assert.Contains("opcache.preload_user=www-data", published, StringComparison.Ordinal);
+        Assert.Contains("opcache.preload=\"/var/www/html/vendor/autoload.php\"", published, StringComparison.Ordinal);
+        Assert.Contains("opcache.preload_user=\"www-data\"", published, StringComparison.Ordinal);
 
         // A preloaded file cannot change without restarting PHP, which would be baffling mid-edit.
         using var directory = new TempAppDirectory();

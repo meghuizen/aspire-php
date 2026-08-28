@@ -70,4 +70,13 @@ builder.AddPhpWebApp("otel-app", "../php-otel")
        .WithHealthCheck()
        .WithExternalHttpEndpoints();
 
+// MailPit comes from CommunityToolkit.Aspire.Hosting.MailPit. This package supplies the PHP side only:
+// SMTP settings in each framework's convention, and a sendmail shim so mail() works.
+var mail = builder.AddMailPit("mail");
+
+builder.AddPhpWebApp("mail-app", "../php-mail")
+       .WithMailReference(mail, from: "sample@example.test", fromName: "Aspire PHP Sample")
+       .WithHealthCheck()
+       .WithExternalHttpEndpoints();
+
 builder.Build().Run();
