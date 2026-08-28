@@ -10,7 +10,8 @@ namespace Aspire.Hosting.PHP;
 /// installed on the machine running the AppHost. Both shapes implement this interface, so the <c>With*</c>
 /// methods work the same either way. See <see cref="PhpRunMode"/>.
 /// </remarks>
-public interface IPhpResource : IResourceWithServiceDiscovery, IResourceWithEnvironment, IResourceWithArgs, IResourceWithWaitSupport
+public interface IPhpResource
+    : IResourceWithServiceDiscovery, IResourceWithEnvironment, IResourceWithArgs, IResourceWithWaitSupport, IComputeResource
 {
     /// <summary>
     /// Gets the full path to the directory holding the PHP application.

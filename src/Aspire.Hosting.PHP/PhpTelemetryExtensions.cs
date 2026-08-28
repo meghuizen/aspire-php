@@ -132,6 +132,14 @@ public static class PhpTelemetryExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(collector);
 
+        // Records which application this collector serves, so a deployment target can keep the two together.
+        // The whole reason the collector exists is that the export is a local write: PHP has no background
+        // thread, so an exporter reaching across a network puts that latency inside the request. A target
+        // that gives every resource its own network identity would undo that silently.
+        collector.WithAnnotation(
+            new PhpCollectorColocationAnnotation(builder.Resource.Name),
+            ResourceAnnotationMutationBehavior.Replace);
+
         return builder
             .WithOpenTelemetry()
             .WaitFor(collector)

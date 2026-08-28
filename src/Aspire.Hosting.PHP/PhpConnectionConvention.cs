@@ -48,7 +48,18 @@ public enum PhpConnectionConvention
     /// <summary>
     /// Joomla's <c>JOOMLA_DB_*</c> names, as used by the official Joomla container image.
     /// </summary>
-    Joomla = 6
+    Joomla = 6,
+
+    /// <summary>
+    /// The <c>AZURE_MYSQL_*</c>, <c>AZURE_POSTGRESQL_*</c> and <c>AZURE_REDIS_*</c> names that Azure Service
+    /// Connector sets, and that every Microsoft PHP tutorial reads.
+    /// </summary>
+    /// <remarks>
+    /// Here so that an application written against Microsoft's documentation runs under Aspire without being
+    /// edited. It also sets <c>MYSQL_ATTR_SSL_CA</c>, which Azure Database for MySQL needs and which is easy
+    /// to miss because the failure looks like a network problem rather than a TLS one.
+    /// </remarks>
+    Azure = 7
 }
 
 /// <summary>

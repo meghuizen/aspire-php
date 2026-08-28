@@ -66,6 +66,10 @@ internal static class PhpConnectionMapper
                 Set(environment, prefix ?? "DATABASE_URL", uri);
                 break;
 
+            case PhpConnectionConvention.Azure:
+                ApplyAzureDatabase(host, port, username, password, databaseName, uri, driver, prefix, environment);
+                break;
+
             case PhpConnectionConvention.WordPress:
                 // WordPress takes host and port as a single value, not two.
                 Set(environment, "WORDPRESS_DB_HOST", CombineHostAndPort(host, port));
@@ -116,6 +120,73 @@ internal static class PhpConnectionMapper
     }
 
     /// <summary>
+    /// The CA bundle path Azure Database for MySQL is reached through.
+    /// </summary>
+    /// <remarks>
+    /// Azure requires TLS. PDO needs to be told where the trust store is, and without it the connection fails
+    /// with an error that reads like the server is unreachable rather than like a certificate problem. This
+    /// path is the distribution's own bundle and exists in both the Alpine and Debian base images.
+    /// </remarks>
+    public const string MySqlCaBundlePath = "/etc/ssl/certs/ca-certificates.crt";
+
+    /// <summary>
+    /// Writes the names Azure Service Connector uses, which is also what Microsoft's PHP tutorials read.
+    /// </summary>
+    private static void ApplyAzureDatabase(
+        ReferenceExpression? host,
+        ReferenceExpression? port,
+        ReferenceExpression? username,
+        ReferenceExpression? password,
+        ReferenceExpression? databaseName,
+        ReferenceExpression? uri,
+        PhpDatabaseDriver driver,
+        string? prefix,
+        IDictionary<string, object> environment)
+    {
+        if (driver == PhpDatabaseDriver.PostgreSql)
+        {
+            var postgres = prefix ?? "AZURE_POSTGRESQL";
+
+            // Service Connector's PHP client type hands over one libpq keyword string rather than parts,
+            // because that is what pg_connect takes. The parts are set as well, for an application using PDO.
+            if (host is not null && databaseName is not null)
+            {
+                var connectionString = port is null
+                    ? ReferenceExpression.Create($"host={host} dbname={databaseName} sslmode=require")
+                    : ReferenceExpression.Create($"host={host} port={port} dbname={databaseName} sslmode=require");
+
+                Set(environment, $"{postgres}_CONNECTIONSTRING", username is null
+                    ? connectionString
+                    : ReferenceExpression.Create($"{connectionString} user={username}"));
+            }
+
+            Set(environment, $"{postgres}_HOST", host);
+            Set(environment, $"{postgres}_PORT", port);
+            Set(environment, $"{postgres}_DATABASE", databaseName);
+            Set(environment, $"{postgres}_USERNAME", username);
+            Set(environment, $"{postgres}_PASSWORD", password);
+            environment[$"{postgres}_SSL"] = "true";
+            return;
+        }
+
+        var mysql = prefix ?? "AZURE_MYSQL";
+
+        Set(environment, $"{mysql}_HOST", host);
+        Set(environment, $"{mysql}_PORT", port);
+
+        // DBNAME rather than DATABASE. Service Connector's spelling, and an application copied from the
+        // tutorial reads exactly that.
+        Set(environment, $"{mysql}_DBNAME", databaseName);
+        Set(environment, $"{mysql}_USERNAME", username);
+        Set(environment, $"{mysql}_PASSWORD", password);
+
+        environment["MYSQL_ATTR_SSL_CA"] = MySqlCaBundlePath;
+
+        // Kept as a fallback for an application that reads a DSN, since the Azure names carry no scheme.
+        Set(environment, "DATABASE_URL", uri);
+    }
+
+    /// <summary>
     /// Writes the cache environment variables for a convention.
     /// </summary>
     public static void ApplyCache(
@@ -142,6 +213,18 @@ internal static class PhpConnectionMapper
         {
             case PhpConnectionConvention.Symfony:
                 Set(environment, prefix ?? "REDIS_URL", uri);
+                break;
+
+            case PhpConnectionConvention.Azure:
+                var azurePrefix = prefix ?? "AZURE_REDIS";
+                Set(environment, $"{azurePrefix}_HOST", host);
+                Set(environment, $"{azurePrefix}_PORT", port);
+                Set(environment, $"{azurePrefix}_PASSWORD", password);
+                environment[$"{azurePrefix}_DATABASE"] = "0";
+
+                // Azure Managed Redis is TLS only, on 10000 rather than 6379. An application that connects
+                // in plaintext gets a read error saying nothing about TLS, so the flag is always stated.
+                environment[$"{azurePrefix}_SSL"] = "true";
                 break;
 
             case PhpConnectionConvention.Laravel:

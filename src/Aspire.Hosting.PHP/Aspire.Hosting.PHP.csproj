@@ -12,6 +12,12 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" />
+
+    <!-- Azure support is opt-in at the API level: .NET does not load an assembly until a method that
+         touches it runs, so an AppHost that never calls the Azure extensions never loads these. -->
+    <PackageReference Include="Aspire.Hosting.Azure.AppContainers" />
+    <PackageReference Include="Aspire.Hosting.Azure.KeyVault" />
+    <PackageReference Include="Aspire.Hosting.Azure.Storage" />
   </ItemGroup>
 
   <ItemGroup>
