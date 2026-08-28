@@ -111,6 +111,91 @@ not the one you targeted. If those differ the resource logs a warning at startup
 you would develop on one version and deploy another with nothing to indicate it. Pass `PhpRunMode.Container` to
 develop on exactly the version you deploy.
 
+## Frameworks and CMSes
+
+| Method | Document root | Composer | Connection names |
+|---|---|---|---|
+| `AddLaravelApp(name, dir)` | `public` | yes | `DB_*`, `REDIS_*` |
+| `AddSymfonyApp(name, dir)` | `public` | yes | `DATABASE_URL`, `REDIS_URL` |
+| `AddWordPressApp(name, dir)` | `.` | no | `WORDPRESS_DB_*` |
+| `AddDrupalApp(name, dir, docRoot?)` | `web` | yes | `DRUPAL_DATABASE_*` |
+| `AddJoomlaApp(name, dir)` | `.` | no | `JOOMLA_DB_*` |
+
+Each is `AddPhpWebApp` with that application's document root, PHP extensions and naming already set, so
+everything on a plain PHP resource still applies. WordPress and Joomla serve from their own root rather than a
+`public/` subdirectory, which is why their document root is `.`.
+
+## Databases and caches
+
+Aspire's own `WithReference` injects an ADO.NET connection string, which no PHP application reads.
+`WithDatabaseReference` and `WithCacheReference` translate the same reference into the variables the target
+actually reads, and install the matching PHP extension:
+
+```csharp
+var db = builder.AddMySql("mysql").AddDatabase("shopdb");
+var cache = builder.AddRedis("cache");
+
+builder.AddLaravelApp("shop", "../shop")
+       .WithDatabaseReference(db)     // DB_CONNECTION=mysql, DB_HOST, DB_PORT, DB_DATABASE, ...
+       .WithCacheReference(cache)     // REDIS_HOST, REDIS_PORT, REDIS_CLIENT=phpredis, REDIS_URL
+       .WaitFor(db)
+       .WaitFor(cache);
+```
+
+MySQL, PostgreSQL, SQL Server and SQLite are recognised, and the driver name is spelled the way each target
+spells it — Laravel wants `pgsql`, Joomla wants `mysqli`. Pass `prefix:` for a second database
+(`prefix: "DB_REPORTING"` yields `DB_REPORTING_HOST`), or `convention:` to override the naming.
+
+Values are passed as Aspire expressions rather than resolved strings, so publishing leaves them as placeholders
+in the generated compose file instead of baking passwords into it.
+
+### Redis is TLS by default
+
+Aspire turns Redis TLS on while running, so the scheme is `rediss://` rather than `redis://`. A client given
+only a host and port connects in plaintext and fails with `read error on connection`, which says nothing about
+TLS. `REDIS_URL` is therefore always set, because it is the only value carrying the scheme — read it and prefix
+the host with `tls://`:
+
+```php
+$url = parse_url(getenv('REDIS_URL'));
+$secure = ($url['scheme'] ?? 'redis') === 'rediss';
+
+$redis = new Redis();
+$redis->connect(($secure ? 'tls://' : '') . $url['host'], (int) $url['port']);
+```
+
+Aspire exports `SSL_CERT_DIR` including its own certificate authority, so verification works without extra
+configuration. See `playground/php-db` for the complete sample.
+
+### Drupal and Joomla read files, not the environment
+
+Drupal's database configuration lives in `settings.php`. The variables are set, but the site has to read them:
+
+```php
+$databases['default']['default'] = [
+  'driver'   => getenv('DRUPAL_DATABASE_DRIVER') ?: 'mysql',
+  'host'     => getenv('DRUPAL_DATABASE_HOST'),
+  'port'     => getenv('DRUPAL_DATABASE_PORT'),
+  'database' => getenv('DRUPAL_DATABASE_NAME'),
+  'username' => getenv('DRUPAL_DATABASE_USERNAME'),
+  'password' => getenv('DRUPAL_DATABASE_PASSWORD'),
+];
+```
+
+Joomla keeps its settings in `configuration.php`, which is PHP source rather than configuration the environment
+can override. The `JOOMLA_DB_*` variables are set for the installer and for images that read them, but a site
+that is already installed keeps using its own file.
+
+### Persistent content
+
+WordPress uploads, Drupal files and Joomla images live on disk. Running locally that is your working copy, but a
+published container starts empty each time. `WithDataVolume` keeps a directory across restarts:
+
+```csharp
+builder.AddWordPressApp("blog", "../blog")
+       .WithDataVolume("wp-content/uploads");
+```
+
 ## Telemetry
 
 `WithOpenTelemetry()` handles the Aspire side. Your application still needs the SDK:
@@ -172,11 +257,16 @@ Verified end to end against real containers:
 - `aspire run` with no PHP installed — container fallback, bind mount, Composer in a container, FrankenPHP
   serving, and every `OTEL_*` variable reaching the PHP process
 - `aspire publish` — both generated Dockerfiles build and run: PHP 8.5.9, FrankenPHP SAPI, non-root `www-data`
+- **MySQL 9.7.2** and **PostgreSQL 18.3** — a PHP app connecting through the translated variables, writing a row
+  and reading it back
+- **Redis over TLS** — connected, wrote and read back
+- PHP 8.5 and 8.4 both selected and running
 - Cross-platform CI on Linux, Windows and macOS
 
-Not yet built: WordPress, Laravel, Symfony, Drupal and Joomla helpers, and MySQL / PostgreSQL / Redis / Memcached
-connection mapping. The gap there is that `WithReference(db)` injects an ADO.NET connection string that no PHP
-application reads — each framework wants a different shape, so a translation layer is needed.
+Honest about what is *not* proven: the framework and CMS helpers set the right document root, extensions and
+variable names, and that is unit-tested, but no full WordPress, Laravel, Symfony, Drupal or Joomla installation
+has been stood up against them yet. Memcached is not covered — it has no Aspire integration and gets its own
+repository.
 
 ## Building
 

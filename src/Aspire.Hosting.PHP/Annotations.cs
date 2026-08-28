@@ -81,3 +81,9 @@ internal sealed class PhpWorkerModeAnnotation(string? workerScript) : IResourceA
 
 /// <summary>Marks that the application opted into PHP-level OpenTelemetry instrumentation.</summary>
 internal sealed class PhpOpenTelemetryAnnotation : IResourceAnnotation;
+
+/// <summary>Records which naming convention a PHP application's references translate into.</summary>
+internal sealed class PhpConnectionConventionAnnotation(PhpConnectionConvention convention) : IResourceAnnotation
+{
+    public PhpConnectionConvention Convention { get; } = convention;
+}

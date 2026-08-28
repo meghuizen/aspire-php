@@ -14,4 +14,29 @@ builder.AddPhpWebApp("web", "../php-web")
        .WithPhpIniSetting("memory_limit", "512M")
        .WithExternalHttpEndpoints();
 
+// Backing services, and a PHP app that actually connects to them. This is what proves the reference
+// translation works: Aspire hands over an ADO.NET connection string, and PHP reads DB_* and REDIS_*.
+var db = builder.AddMySql("mysql")
+                .AddDatabase("appdb");
+
+var cache = builder.AddRedis("cache");
+
+builder.AddPhpWebApp("data", "../php-db")
+       .WithComposer()
+       .WithDatabaseReference(db)
+       .WithCacheReference(cache)
+       .WaitFor(db)
+       .WaitFor(cache)
+       .WithExternalHttpEndpoints();
+
+// The same sample against PostgreSQL, to prove the driver mapping rather than only the MySQL path.
+var pgDb = builder.AddPostgres("pg")
+                  .AddDatabase("pgappdb");
+
+builder.AddPhpWebApp("data-pg", "../php-db")
+       .WithComposer()
+       .WithDatabaseReference(pgDb)
+       .WaitFor(pgDb)
+       .WithExternalHttpEndpoints();
+
 builder.Build().Run();

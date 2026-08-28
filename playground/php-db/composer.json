@@ -1,0 +1,12 @@
+{
+    "name": "aspire/php-db",
+    "description": "Verifies that Aspire database and cache references reach PHP",
+    "require": {
+        "php": "^8.5"
+    },
+    "config": {
+        "platform": {
+            "php": "8.5.0"
+        }
+    }
+}
