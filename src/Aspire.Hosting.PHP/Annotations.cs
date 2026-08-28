@@ -99,3 +99,6 @@ internal sealed class PhpWebServerAnnotation(PhpWebServer webServer) : IResource
 {
     public PhpWebServer WebServer { get; } = webServer;
 }
+
+/// <summary>Marks a collector as forwarding to Application Insights.</summary>
+internal sealed class PhpApplicationInsightsAnnotation : IResourceAnnotation;

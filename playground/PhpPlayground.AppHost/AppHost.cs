@@ -60,4 +60,14 @@ builder.AddPhpWebApp("nginx-app", "../php-web", webServer: PhpWebServer.FpmNginx
        .WithHealthCheck()
        .WithExternalHttpEndpoints();
 
+// A collector for PHP to export to. PHP has no background thread, so exporting straight to a backend
+// puts the cost inside the request; exporting to a local collector does not.
+var collector = builder.AddOpenTelemetryCollector("otel");
+
+builder.AddPhpWebApp("otel-app", "../php-otel")
+       .WithComposer()
+       .WithOpenTelemetry(collector)
+       .WithHealthCheck()
+       .WithExternalHttpEndpoints();
+
 builder.Build().Run();
